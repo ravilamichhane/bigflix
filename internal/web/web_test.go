@@ -327,3 +327,74 @@ func TestConnectRPCAuthAndWorkflows(t *testing.T) {
 		t.Fatalf("expected persisted token rotated-secret, got %q err=%v", persisted, err)
 	}
 }
+
+func TestFrontendDevProxy(t *testing.T) {
+	devHits := 0
+	devServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		devHits++
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("vite-dev:" + r.URL.Path))
+	}))
+	defer devServer.Close()
+
+	db, err := database.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service, _ := catalog.New(db, "https://example.com/api/v2/", "")
+
+	t.Setenv("FRONTEND_URL", "not-a-url")
+	if _, err := New(service); err == nil {
+		t.Fatal("expected error for invalid FRONTEND_URL")
+	}
+
+	t.Setenv("AUTH_TOKEN", "dev-secret")
+	t.Setenv("FRONTEND_URL", devServer.URL)
+	h, err := New(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := srv.Client().Get(srv.URL + "/downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 64)
+	n, _ := resp.Body.Read(buf)
+	if resp.StatusCode != 200 || string(buf[:n]) != "vite-dev:/downloads" {
+		t.Fatalf("expected proxied vite response, got status=%d body=%q", resp.StatusCode, string(buf[:n]))
+	}
+	if !strings.Contains(resp.Header.Get("Content-Security-Policy"), "'unsafe-inline'") {
+		t.Fatalf("expected relaxed dev CSP, got %q", resp.Header.Get("Content-Security-Policy"))
+	}
+	if devHits != 1 {
+		t.Fatalf("expected 1 dev server hit, got %d", devHits)
+	}
+
+	// ConnectRPC and media routes must still go to the Go backend with auth enforcement.
+	var tok atomic.Value
+	tok.Store("")
+	c := bearerClient(srv.URL, srv.Client(), &tok)
+	if _, err := c.GetStatus(context.Background(), connect.NewRequest(&bigflixv1.GetStatusRequest{})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected CodeUnauthenticated in proxy mode, got %v", err)
+	}
+	tok.Store("dev-secret")
+	if res, err := c.GetStatus(context.Background(), connect.NewRequest(&bigflixv1.GetStatusRequest{})); err != nil || res.Msg.Status != "ok" {
+		t.Fatalf("expected authenticated GetStatus ok in proxy mode, got res=%v err=%v", res, err)
+	}
+	mediaResp, err := srv.Client().Get(srv.URL + "/media/" + strings.Repeat("a", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaResp.Body.Close()
+	if mediaResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated media in proxy mode, got %d", mediaResp.StatusCode)
+	}
+	if devHits != 1 {
+		t.Fatalf("ConnectRPC/media hit dev server unexpectedly: devHits=%d", devHits)
+	}
+}

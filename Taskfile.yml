@@ -4,7 +4,6 @@ version: '3'
 
 dotenv:
   - .env.example
-  - .env
 
 tasks:
   frontend:
@@ -17,6 +16,16 @@ tasks:
     cmds:
       - protoc -I proto --go_out=internal/gen --go_opt=paths=source_relative --connect-go_out=internal/gen --connect-go_opt=paths=source_relative proto/bigflix/v1/bigflix.proto
       - protoc -I proto --es_out=frontend/src/gen --es_opt=target=ts proto/bigflix/v1/bigflix.proto
+
+  dev:
+    desc: Run Vite dev server and Go backend proxying frontend requests to Vite
+    cmds:
+      - |
+        npm --prefix frontend run dev &
+        VITE_PID=$!
+        trap "kill $VITE_PID 2>/dev/null || true" EXIT INT TERM
+        FRONTEND_URL=http://127.0.0.1:5173 go run ./cmd/bigflix
+    silent: true
 
   run:
     desc: Build frontend and run Bigflix server

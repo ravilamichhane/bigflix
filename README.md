@@ -86,7 +86,19 @@ go build -o bin/bigflix ./cmd/bigflix
 AUTH_TOKEN=your-secret-token ./bin/bigflix
 ```
 
-If you use [Task](https://taskfile.dev/), `task run` builds the frontend and starts the server using `.env.example`.
+For hot-reloading development, run Vite and point the Go backend to the Vite dev server via `FRONTEND_URL` (or run `task dev`):
+
+```sh
+# Terminal 1
+npm --prefix frontend run dev
+
+# Terminal 2
+FRONTEND_URL=http://127.0.0.1:5173 go run ./cmd/bigflix
+```
+
+Open `http://localhost:3000` — the Go server serves ConnectRPC and `/media/*` directly and proxies frontend routes and HMR to Vite.
+
+If you use [Task](https://taskfile.dev/), `task run` builds the frontend and starts the server using `.env.example`, and `task dev` starts both Vite and the Go proxy together.
 
 ---
 
@@ -106,6 +118,7 @@ Go reads configuration from environment variables (it does not load `.env` files
 | `MIN_FREE_GB` | `10` | Minimum free disk space reserve; downloading pauses below this threshold |
 | `YTS_API_URL` | `https://movies-api.accel.li/api/v2/` | YTS API base URL |
 | `TMDB_READ_TOKEN` | unset | Optional TMDB API Read Access Token (Bearer token) for Trending and New Releases tabs |
+| `FRONTEND_URL` | unset | Optional dev frontend server URL (e.g. `http://127.0.0.1:5173`); when set, Go proxies frontend requests there instead of serving embedded `dist` |
 
 ---
 

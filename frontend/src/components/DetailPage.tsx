@@ -103,14 +103,6 @@ export function DetailPage({ id, navigate }: DetailPageProps) {
       ) : (
         movie && (
           <>
-            {movie.poster && (
-              <div
-                className="detail-backdrop"
-                style={{ backgroundImage: `url(${movie.poster})` }}
-                aria-hidden="true"
-              />
-            )}
-
             <section className="movie-detail">
               <div className="detail-poster poster">
                 {movie.poster && !posterBroken && (

@@ -11,6 +11,8 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -79,37 +81,59 @@ func NewWithRestart(service *catalog.Service, engine *downloads.Manager, restart
 	a.downloadRoutes(mux)
 	a.remuxRoutes(mux)
 
-	dist, err := fs.Sub(assets, "dist")
-	if err != nil {
-		return nil, err
+	csp := "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' blob:; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+	frontendURL := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	if frontendURL == "" {
+		frontendURL = strings.TrimSpace(os.Getenv("FRONTEND_DEV_URL"))
 	}
-	indexHTML, err := fs.ReadFile(dist, "index.html")
-	if err != nil {
-		return nil, err
-	}
-	fileServer := http.FileServer(http.FS(dist))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.NotFound(w, r)
-			return
+	if frontendURL != "" {
+		target, err := url.Parse(frontendURL)
+		if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+			return nil, errors.New("FRONTEND_URL must be an http or https URL")
 		}
-		clean := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-		if clean != "" {
-			if info, err := fs.Stat(dist, clean); err == nil && !info.IsDir() {
-				fileServer.ServeHTTP(w, r)
-				return
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				controller := http.NewResponseController(w)
+				_ = controller.SetReadDeadline(time.Time{})
+				_ = controller.SetWriteDeadline(time.Time{})
 			}
-			if strings.HasPrefix(clean, "assets/") || strings.HasPrefix(clean, "vendor/") {
+			proxy.ServeHTTP(w, r)
+		})
+		csp = "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' blob: ws: wss: http: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+	} else {
+		dist, err := fs.Sub(assets, "dist")
+		if err != nil {
+			return nil, err
+		}
+		indexHTML, err := fs.ReadFile(dist, "index.html")
+		if err != nil {
+			return nil, err
+		}
+		fileServer := http.FileServer(http.FS(dist))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				http.NotFound(w, r)
 				return
 			}
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		if r.Method == http.MethodGet {
-			_, _ = w.Write(indexHTML)
-		}
-	})
+			clean := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+			if clean != "" {
+				if info, err := fs.Stat(dist, clean); err == nil && !info.IsDir() {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+				if strings.HasPrefix(clean, "assets/") || strings.HasPrefix(clean, "vendor/") {
+					http.NotFound(w, r)
+					return
+				}
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			if r.Method == http.MethodGet {
+				_, _ = w.Write(indexHTML)
+			}
+		})
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host && o != "https://"+r.Host {
@@ -118,7 +142,7 @@ func NewWithRestart(service *catalog.Service, engine *downloads.Manager, restart
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' blob:; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", csp)
 		w.Header().Set("Cache-Control", "no-store")
 		mux.ServeHTTP(w, r)
 	}), nil
