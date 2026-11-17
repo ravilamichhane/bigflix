@@ -1,0 +1,13 @@
+.git
+bin
+data
+media
+cmd/bigflix/data
+cmd/bigflix/media
+.env
+.DS_Store
+frontend/node_modules
+internal/web/dist
+*.db
+*.db-shm
+*.db-wal

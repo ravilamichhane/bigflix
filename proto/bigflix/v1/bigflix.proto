@@ -1,0 +1,313 @@
+syntax = "proto3";
+
+package bigflix.v1;
+
+option go_package = "bigflix/internal/gen/bigflix/v1;bigflixv1";
+
+service BigflixService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc UpdateAuthToken(UpdateAuthTokenRequest) returns (UpdateAuthTokenResponse);
+
+  rpc ListMovies(ListMoviesRequest) returns (ListMoviesResponse);
+  rpc GetMovie(GetMovieRequest) returns (GetMovieResponse);
+  rpc FindSources(FindSourcesRequest) returns (FindSourcesResponse);
+
+  rpc ListDownloads(ListDownloadsRequest) returns (ListDownloadsResponse);
+  rpc GetDownload(GetDownloadRequest) returns (GetDownloadResponse);
+  rpc WatchDownload(WatchDownloadRequest) returns (stream WatchDownloadResponse);
+  rpc StartDownload(StartDownloadRequest) returns (StartDownloadResponse);
+  rpc UpdateDownload(UpdateDownloadRequest) returns (UpdateDownloadResponse);
+  rpc DeleteDownload(DeleteDownloadRequest) returns (DeleteDownloadResponse);
+
+  rpc ProbeMedia(ProbeMediaRequest) returns (ProbeMediaResponse);
+
+  rpc ListSubtitles(ListSubtitlesRequest) returns (ListSubtitlesResponse);
+  rpc GetSubtitle(GetSubtitleRequest) returns (GetSubtitleResponse);
+  rpc SearchSubtitles(SearchSubtitlesRequest) returns (SearchSubtitlesResponse);
+  rpc AddSubtitle(AddSubtitleRequest) returns (AddSubtitleResponse);
+
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc SaveNetworkSettings(SaveNetworkSettingsRequest) returns (SaveNetworkSettingsResponse);
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string status = 1;
+  string milestone = 2;
+  bool has_tmdb = 3;
+}
+
+message UpdateAuthTokenRequest {
+  string new_token = 1;
+}
+
+message UpdateAuthTokenResponse {}
+
+message Torrent {
+  string hash = 1;
+  string quality = 2;
+  string type = 3;
+  string video_codec = 4;
+  string size = 5;
+  int64 size_bytes = 6;
+  int32 seeds = 7;
+  int32 peers = 8;
+  string audio_channels = 9;
+}
+
+message Movie {
+  int32 id = 1;
+  string imdb_code = 2;
+  string title = 3;
+  int32 year = 4;
+  double rating = 5;
+  int32 runtime = 6;
+  repeated string genres = 7;
+  string summary = 8;
+  string description_full = 9;
+  string poster = 10;
+  string small_poster = 11;
+  string background = 12;
+  string language = 13;
+  repeated Torrent torrents = 14;
+  int32 tmdb_id = 15;
+  string release_date = 16;
+}
+
+message ListMoviesRequest {
+  string feed = 1;
+  string query = 2;
+  string genre = 3;
+  string sort = 4;
+  int32 page = 5;
+}
+
+message ListMoviesResponse {
+  repeated Movie movies = 1;
+  int32 count = 2;
+  int32 page = 3;
+  bool has_prev = 4;
+  bool has_next = 5;
+  string heading = 6;
+  string subtitle = 7;
+  string updated_at = 8;
+  bool stale = 9;
+  string notice = 10;
+  bool has_tmdb = 11;
+  string error_message = 12;
+}
+
+message GetMovieRequest {
+  int32 id = 1;
+}
+
+message GetMovieResponse {
+  Movie movie = 1;
+  string updated_at = 2;
+  bool stale = 3;
+}
+
+message FindSourcesRequest {
+  int32 tmdb_id = 1;
+}
+
+message FindSourcesResponse {
+  repeated Movie movies = 1;
+  int32 count = 2;
+  string notice = 3;
+}
+
+message VideoFile {
+  int32 index = 1;
+  string name = 2;
+  int64 size = 3;
+  bool playable = 4;
+}
+
+message DownloadStatus {
+  string hash = 1;
+  string title = 2;
+  string poster = 3;
+  int32 movie_id = 4;
+  int32 file_index = 5;
+  bool keep = 6;
+  bool paused = 7;
+  string created = 8;
+  double position = 9;
+  string state = 10;
+  string error = 11;
+  repeated VideoFile files = 12;
+  int64 size = 13;
+  int64 completed = 14;
+  int64 buffered = 15;
+  int64 speed = 16;
+  int32 peers = 17;
+  bool discovering = 18;
+  int32 readers = 19;
+  double progress = 20;
+  bool playable = 21;
+  bool direct = 22;
+}
+
+message ListDownloadsRequest {}
+
+message ListDownloadsResponse {
+  repeated DownloadStatus downloads = 1;
+}
+
+message GetDownloadRequest {
+  string hash = 1;
+}
+
+message GetDownloadResponse {
+  DownloadStatus download = 1;
+}
+
+message WatchDownloadRequest {
+  string hash = 1;
+}
+
+message WatchDownloadResponse {
+  DownloadStatus download = 1;
+}
+
+message StartDownloadRequest {
+  int32 movie_id = 1;
+  string hash = 2;
+  bool keep = 3;
+}
+
+message StartDownloadResponse {
+  DownloadStatus download = 1;
+}
+
+message UpdateDownloadRequest {
+  string hash = 1;
+  string action = 2;
+  int32 file_index = 3;
+  double position = 4;
+}
+
+message UpdateDownloadResponse {
+  DownloadStatus download = 1;
+}
+
+message DeleteDownloadRequest {
+  string hash = 1;
+}
+
+message DeleteDownloadResponse {}
+
+message ProbeMediaRequest {
+  string hash = 1;
+}
+
+message ProbeMediaResponse {
+  double duration = 1;
+  string video = 2;
+  string codecs = 3;
+  int32 width = 4;
+  int32 height = 5;
+  string audio = 6;
+}
+
+message SubtitleTrack {
+  string id = 1;
+  string label = 2;
+  string language = 3;
+}
+
+message BundledSubtitleFile {
+  int32 index = 1;
+  string name = 2;
+}
+
+message SubtitleSearchResult {
+  int32 id = 1;
+  string language = 2;
+  string label = 3;
+  int32 rating = 4;
+  bool hearing_impaired = 5;
+  string page = 6;
+}
+
+message ListSubtitlesRequest {
+  string hash = 1;
+}
+
+message ListSubtitlesResponse {
+  repeated SubtitleTrack tracks = 1;
+  repeated BundledSubtitleFile bundled = 2;
+  bool configured = 3;
+}
+
+message GetSubtitleRequest {
+  string hash = 1;
+  string id = 2;
+}
+
+message GetSubtitleResponse {
+  string vtt = 1;
+}
+
+message SearchSubtitlesRequest {
+  string hash = 1;
+  string language = 2;
+}
+
+message SearchSubtitlesResponse {
+  repeated SubtitleSearchResult results = 1;
+}
+
+message AddSubtitleRequest {
+  string hash = 1;
+  string action = 2;
+  string language = 3;
+  int32 id = 4;
+  string label = 5;
+  int32 index = 6;
+  bytes data = 7;
+  string filename = 8;
+}
+
+message AddSubtitleResponse {
+  SubtitleTrack track = 1;
+}
+
+message NetworkInterface {
+  string name = 1;
+  bool up = 2;
+  repeated string addresses = 3;
+  bool selected = 4;
+  int32 port = 5;
+  repeated string listeners = 6;
+}
+
+message InterfaceBindingInput {
+  string name = 1;
+  int32 port = 2;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  bool has_tmdb = 1;
+  bool has_engine = 2;
+  bool all_interfaces = 3;
+  int32 port = 4;
+  int32 actual_port = 5;
+  repeated NetworkInterface interfaces = 6;
+  repeated string errors = 7;
+}
+
+message SaveNetworkSettingsRequest {
+  bool interface_settings = 1;
+  repeated InterfaceBindingInput bindings = 2;
+  string mode = 3;
+  int32 port = 4;
+}
+
+message SaveNetworkSettingsResponse {
+  bool restarting = 1;
+}
