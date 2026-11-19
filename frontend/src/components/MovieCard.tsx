@@ -31,18 +31,14 @@ export function MovieCard({ movie, navigate }: MovieCardProps) {
           />
         )}
         <div className="poster-fallback" aria-hidden="true">
-          <span>BIGFLIX</span>
           <strong>{movie.title}</strong>
         </div>
-        <span className="rating">★ {movie.rating.toFixed(1)}</span>
-        <span className="card-arrow" aria-hidden="true">
-          ↗
-        </span>
+        {movie.rating > 0 && <span className="rating">★ {movie.rating.toFixed(1)}</span>}
       </div>
       <h2>{movie.title}</h2>
       <div className="card-meta">
-        <span>{movie.year || "Year unknown"}</span>
-        <span>{movie.tmdbId ? "Find sources" : movie.language || "Movie"}</span>
+        <span>{movie.year || "—"}</span>
+        {movie.tmdbId ? <span>Sources</span> : movie.language ? <span>{movie.language}</span> : null}
       </div>
     </a>
   );

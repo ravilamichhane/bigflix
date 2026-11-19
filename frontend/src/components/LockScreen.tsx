@@ -37,10 +37,9 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
         <div className="brand">
           <span className="brand-mark">b</span>
           <span>bigflix</span>
-          <span className="local">LOCKED</span>
         </div>
-        <h1>Unlock Bigflix</h1>
-        <p>Enter the server access token to browse, download, and stream.</p>
+        <h1>Unlock</h1>
+        <p>Enter your access token to continue.</p>
         <form className="lock-form" onSubmit={handleSubmit}>
           <input
             type="password"

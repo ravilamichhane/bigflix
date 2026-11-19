@@ -5,7 +5,7 @@ import type {
   SubtitleSearchResult,
   SubtitleTrack,
 } from "../gen/bigflix/v1/bigflix_pb";
-import type { VjsPlayer } from "../types";
+import { CloseIcon } from "./Icons";
 
 const LANGUAGES = [
   { value: "en", label: "English" },
@@ -23,20 +23,22 @@ const LANGUAGES = [
 
 interface SubtitleDialogProps {
   hash: string;
-  player: VjsPlayer | null;
+  video: HTMLVideoElement | null;
   openSignal: number;
   onCloseFocus?: () => void;
+  onActiveChange?: (active: boolean) => void;
 }
 
 export function SubtitleDialog({
   hash,
-  player,
+  video,
   openSignal,
   onCloseFocus,
+  onActiveChange,
 }: SubtitleDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const currentTrackRef = useRef<TextTrack | undefined>(undefined);
+  const trackElRef = useRef<HTMLTrackElement | null>(null);
   const blobUrlRef = useRef<string>("");
   const originalTimesRef = useRef(new WeakMap<TextTrackCue, [number, number]>());
 
@@ -86,22 +88,28 @@ export function SubtitleDialog({
     }
   }, []);
 
+  const clearTrack = useCallback(() => {
+    if (trackElRef.current) {
+      if (trackElRef.current.track) {
+        trackElRef.current.track.mode = "disabled";
+      }
+      trackElRef.current.remove();
+      trackElRef.current = null;
+    }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = "";
+    }
+  }, []);
+
   const selectTrack = useCallback(
     async (id: string, trackList: SubtitleTrack[], delayVal: number) => {
       setPreferred(id);
-      if (currentTrackRef.current && player) {
-        try {
-          player.removeRemoteTextTrack(currentTrackRef.current);
-        } catch {
-          // Ignore if player already disposed.
-        }
-        currentTrackRef.current = undefined;
+      clearTrack();
+      if (!id || !video) {
+        onActiveChange?.(false);
+        return;
       }
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = "";
-      }
-      if (!id || !player) return;
 
       try {
         const res = await client.getSubtitle({ hash, id });
@@ -109,27 +117,27 @@ export function SubtitleDialog({
         const blob = new Blob([res.vtt], { type: "text/vtt" });
         const url = URL.createObjectURL(blob);
         blobUrlRef.current = url;
-        const remote = player.addRemoteTextTrack(
-          {
-            kind: "subtitles",
-            src: url,
-            label: meta ? `${meta.language} · ${meta.label}` : "Subtitles",
-            srclang: meta?.language || language,
-            default: true,
-          },
-          false,
-        );
-        currentTrackRef.current = remote.track;
-        remote.track.mode = "showing";
-        remote.addEventListener("load", () => {
-          applyDelay(remote.track, delayVal);
-          remote.track.mode = "showing";
+
+        const el = document.createElement("track");
+        el.kind = "subtitles";
+        el.src = url;
+        el.label = meta ? `${meta.language} · ${meta.label}` : "Subtitles";
+        el.srclang = meta?.language || language;
+        el.default = true;
+        el.addEventListener("load", () => {
+          applyDelay(el.track, delayVal);
+          el.track.mode = "showing";
         });
+        video.appendChild(el);
+        trackElRef.current = el;
+        el.track.mode = "showing";
+        onActiveChange?.(true);
       } catch (err) {
+        onActiveChange?.(false);
         setStatus(errMessage(err));
       }
     },
-    [applyDelay, hash, language, player],
+    [applyDelay, clearTrack, hash, language, onActiveChange, video],
   );
 
   const refresh = useCallback(
@@ -150,25 +158,27 @@ export function SubtitleDialog({
   );
 
   useEffect(() => {
+    if (!video) return;
     void refresh();
     return () => {
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = "";
-      }
+      clearTrack();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash]);
+  }, [hash, video]);
 
   useEffect(() => {
-    if (!player) return;
+    if (!video) return;
     const handleMeta = () => {
-      if (preferred && tracks.some((t) => t.id === preferred)) {
+      if (trackElRef.current?.track) {
+        trackElRef.current.track.mode = "showing";
+        applyDelay(trackElRef.current.track, offset);
+      } else if (preferred && tracks.some((t) => t.id === preferred)) {
         void selectTrack(preferred, tracks, offset);
       }
     };
-    player.on("loadedmetadata", handleMeta);
-  }, [player, preferred, tracks, offset, selectTrack]);
+    video.addEventListener("loadedmetadata", handleMeta);
+    return () => video.removeEventListener("loadedmetadata", handleMeta);
+  }, [video, preferred, tracks, offset, applyDelay, selectTrack]);
 
   useEffect(() => {
     if (openSignal > 0 && dialogRef.current && !dialogRef.current.open) {
@@ -185,8 +195,8 @@ export function SubtitleDialog({
       setResults(res.results);
       setStatus(
         res.results.length
-          ? "Choose the release matching your video for the best timing."
-          : "No new subtitles found for this language. Downloaded tracks are available in Saved & timing.",
+          ? "Pick a release matching your video for best timing."
+          : "No new subtitles found for this language.",
       );
     } catch (err) {
       setStatus(errMessage(err));
@@ -221,7 +231,7 @@ export function SubtitleDialog({
         if (params.action === "download" && params.id) {
           setResults((prev) => prev.filter((r) => r.id !== params.id));
         }
-        setStatus(`Ready: ${res.track.label}. Adjust timing if needed.`);
+        setStatus(`Active: ${res.track.label}`);
       }
     } catch (err) {
       setStatus(errMessage(err));
@@ -266,28 +276,21 @@ export function SubtitleDialog({
         }
       }}
     >
-      <div className="section-top">
-        <div>
-          <div className="eyebrow">MAKE IT YOURS</div>
-          <h2 id="subtitle-title">Subtitles</h2>
-        </div>
+      <div className="dialog-head">
+        <h2 id="subtitle-title">Subtitles</h2>
         <button
           type="button"
-          className="button secondary"
+          className="icon-btn"
           aria-label="Close subtitles"
           onClick={() => dialogRef.current?.close()}
         >
-          Close ✕
+          <CloseIcon size={18} />
         </button>
       </div>
-      <p className="muted">
-        Find the right language and release, or bring your own subtitle file.
-      </p>
 
-      <div className="subtitle-tabs" role="group" aria-label="Subtitle sources">
+      <div className="seg-tabs" role="group" aria-label="Subtitle sources">
         <button
           type="button"
-          className="button secondary"
           aria-pressed={tab === "online"}
           onClick={() => setTab("online")}
         >
@@ -295,19 +298,17 @@ export function SubtitleDialog({
         </button>
         <button
           type="button"
-          className="button secondary"
           aria-pressed={tab === "saved"}
           onClick={() => setTab("saved")}
         >
-          Saved & timing
+          Saved &amp; timing
         </button>
         <button
           type="button"
-          className="button secondary"
           aria-pressed={tab === "upload"}
           onClick={() => setTab("upload")}
         >
-          Upload file
+          Upload
         </button>
       </div>
 
@@ -325,61 +326,53 @@ export function SubtitleDialog({
           </label>
           <button
             type="button"
-            className="button secondary"
+            className="button"
             disabled={busy}
             onClick={() => void handleSearch()}
           >
-            Find subtitles
+            {busy ? "Searching…" : "Search"}
           </button>
         </div>
-        <div>
+        <div className="subtitle-list">
           {results.map((match) => (
             <div key={match.id} className="subtitle-result">
-              <span>
-                {match.label} · rating {match.rating}
-                {match.hearingImpaired ? " · SDH" : ""}
-              </span>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={busy}
-                onClick={() =>
-                  void handleAdd({
-                    action: "download",
-                    id: match.id,
-                    label: match.label,
-                  })
-                }
-              >
-                Download & use
-              </button>
-              {/^\/subtitles\/[a-zA-Z0-9_-]+$/.test(match.page || "") && (
-                <a
-                  href={`https://yifysubtitles.ch${match.page}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-link"
+              <div className="subtitle-result-info">
+                <span>{match.label}</span>
+                <small>
+                  Rating {match.rating}
+                  {match.hearingImpaired ? " · SDH" : ""}
+                </small>
+              </div>
+              <div className="subtitle-result-actions">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void handleAdd({
+                      action: "download",
+                      id: match.id,
+                      label: match.label,
+                    })
+                  }
                 >
-                  Open subtitle page ↗
-                </a>
-              )}
+                  Use
+                </button>
+              </div>
             </div>
           ))}
         </div>
-        <p className="muted">
-          Powered by YIFY Subtitles. Pick a release matching your video for the best timing.
-        </p>
       </div>
 
       <div hidden={tab !== "saved"}>
         <div className="subtitle-controls">
           <label>
-            Saved subtitles
+            Active track
             <select
               value={preferred}
               onChange={(e) => void selectTrack(e.target.value, tracks, offset)}
             >
-              <option value="">Subtitles off</option>
+              <option value="">Off</option>
               {tracks.map((sub) => (
                 <option key={sub.id} value={sub.id}>
                   {sub.language} · {sub.label}
@@ -387,8 +380,8 @@ export function SubtitleDialog({
               ))}
             </select>
           </label>
-          <label>
-            Timing offset (seconds)
+          <label className="offset-field">
+            Timing offset (s)
             <input
               id="subtitle-delay"
               type="number"
@@ -399,51 +392,51 @@ export function SubtitleDialog({
               onChange={(e) => {
                 const next = Math.max(-120, Math.min(120, Number(e.target.value) || 0));
                 setOffset(next);
-                applyDelay(currentTrackRef.current, next);
+                applyDelay(trackElRef.current?.track, next);
               }}
             />
           </label>
         </div>
-        <p className="muted">
-          Positive offset shows subtitles later; negative shows them earlier. Caption appearance
-          is available in the player’s CC menu.
-        </p>
-        <div id="subtitle-bundled">
-          {bundled.map((file) => (
-            <button
-              key={file.index}
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => void handleAdd({ action: "bundled", index: file.index })}
-            >
-              Use {file.name}
-            </button>
-          ))}
-        </div>
+        <p className="muted">Positive shows subtitles later; negative earlier.</p>
+        {bundled.length > 0 && (
+          <div id="subtitle-bundled">
+            {bundled.map((file) => (
+              <button
+                key={file.index}
+                type="button"
+                className="button secondary"
+                disabled={busy}
+                onClick={() => void handleAdd({ action: "bundled", index: file.index })}
+              >
+                Use {file.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div hidden={tab !== "upload"}>
         <div className="subtitle-controls">
           <label>
-            Upload SRT / VTT
+            SRT or WebVTT file (max 2 MB)
             <input ref={fileInputRef} type="file" accept=".srt,.vtt,text/vtt" />
           </label>
           <button
             type="button"
-            className="button secondary"
+            className="button"
             disabled={busy}
             onClick={() => void handleUpload()}
           >
-            Upload & use
+            Upload
           </button>
         </div>
-        <p className="muted">SRT or WebVTT, up to 2 MB. Saved locally for your next watch.</p>
       </div>
 
-      <p id="subtitle-status" role="status" aria-live="polite">
-        {status}
-      </p>
+      {status && (
+        <p id="subtitle-status" role="status" aria-live="polite">
+          {status}
+        </p>
+      )}
     </dialog>
   );
 }

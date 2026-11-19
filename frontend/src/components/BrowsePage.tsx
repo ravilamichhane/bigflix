@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { client, errMessage, formatTime } from "../api";
 import type { ListMoviesResponse } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
+import { CloseIcon, SearchIcon } from "./Icons";
 import { MovieCard } from "./MovieCard";
 
 const GENRES = [
@@ -34,17 +35,13 @@ export function BrowsePage({ search, navigate }: BrowsePageProps) {
   const page = Math.max(1, Number(params.get("page")) || 1);
 
   const [searchInput, setSearchInput] = useState(query);
-  const [genreInput, setGenreInput] = useState(genre);
-  const [sortInput, setSortInput] = useState(sort);
   const [data, setData] = useState<ListMoviesResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setSearchInput(query);
-    setGenreInput(genre);
-    setSortInput(sort);
-  }, [query, genre, sort]);
+  }, [query]);
 
   useEffect(() => {
     let active = true;
@@ -93,114 +90,118 @@ export function BrowsePage({ search, navigate }: BrowsePageProps) {
     navigate(buildUrl({ feed: "", q: searchInput.trim(), page: "" }));
   }
 
-  function handleFilters(e: FormEvent) {
-    e.preventDefault();
-    navigate(
-      buildUrl({
-        feed: "",
-        q: query,
-        genre: genreInput,
-        sort: sortInput === "date_added" ? "" : sortInput,
-        page: "",
-      }),
-    );
-  }
-
   const displayError = error || data?.errorMessage || "";
   const hasTmdb = data?.hasTmdb ?? false;
 
   return (
-    <>
-      <section className="intro">
-        <div className="eyebrow">A LITTLE ESCAPE, ON YOUR TERMS</div>
-        <h1>{data?.heading || "Find your next great watch."}</h1>
-        <p>{data?.subtitle || "Movies worth staying in for. Your library starts here."}</p>
+    <div className="browse-page">
+      <div className="browse-toolbar">
         <form className="search" onSubmit={handleSearch}>
-          <span aria-hidden="true">⌕</span>
+          <SearchIcon size={16} className="search-icon" />
           <input
             aria-label="Search movies"
-            placeholder="Search movies, or enter an IMDb ID…"
+            placeholder="Search movies or IMDb ID…"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             maxLength={200}
           />
-          <button type="submit">
-            Search <span aria-hidden="true">↗</span>
-          </button>
+          {searchInput && (
+            <button
+              type="button"
+              className="search-clear"
+              aria-label="Clear search"
+              onClick={() => {
+                setSearchInput("");
+                if (query) navigate(buildUrl({ feed: "", q: "", page: "" }));
+              }}
+            >
+              <CloseIcon size={14} />
+            </button>
+          )}
         </form>
-      </section>
-
-      <section className="catalog">
-        <div className="section-top">
-          <div className="tabs">
-            {[
-              { id: "library", label: "Recently added" },
-              { id: "day", label: "Trending today" },
-              { id: "week", label: "This week" },
-              { id: "new", label: "New releases" },
-            ].map((t) => {
-              const href = t.id === "library" ? "/" : `/?feed=${t.id}`;
-              return (
-                <a
-                  key={t.id}
-                  href={href}
-                  className={feed === t.id ? "active" : ""}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(href);
-                  }}
-                >
-                  {t.label}
-                </a>
-              );
-            })}
-          </div>
-          {!!data?.count && <span className="count">{data.count} titles</span>}
-        </div>
 
         {feed === "library" && (
-          <form className="filters" onSubmit={handleFilters}>
-            <label>
-              Genre
-              <select value={genreInput} onChange={(e) => setGenreInput(e.target.value)}>
-                <option value="">All genres</option>
-                {GENRES.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Sort by
-              <select value={sortInput} onChange={(e) => setSortInput(e.target.value)}>
-                <option value="date_added">Recently added</option>
-                <option value="rating">Rating</option>
-                <option value="year">Release year</option>
-              </select>
-            </label>
-            <button className="filter-button" type="submit">
-              Apply
-            </button>
-            <span className="source-label">
-              SOURCE: YTS <span className="dot" />
-            </span>
-          </form>
-        )}
-
-        {loading && !data ? (
-          <div className="empty">
-            <h2>Loading catalog…</h2>
+          <div className="filter-selects">
+            <select
+              aria-label="Genre"
+              value={genre}
+              onChange={(e) =>
+                navigate(buildUrl({ feed: "", q: query, genre: e.target.value, page: "" }))
+              }
+            >
+              <option value="">All genres</option>
+              {GENRES.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Sort by"
+              value={sort}
+              onChange={(e) =>
+                navigate(
+                  buildUrl({
+                    feed: "",
+                    q: query,
+                    sort: e.target.value === "date_added" ? "" : e.target.value,
+                    page: "",
+                  }),
+                )
+              }
+            >
+              <option value="date_added">Recent</option>
+              <option value="rating">Top rated</option>
+              <option value="year">Newest year</option>
+            </select>
           </div>
-        ) : displayError ? (
-          <div className="empty">
-            <span className="empty-symbol">◉</span>
-            <h2>
-              {!hasTmdb && feed !== "library"
-                ? "A wider world awaits."
-                : "Let’s try that again."}
-            </h2>
-            <p>{displayError}</p>
+        )}
+      </div>
+
+      <div className="feed-bar">
+        <div className="tabs">
+          {[
+            { id: "library", label: "Library" },
+            { id: "day", label: "Trending today" },
+            { id: "week", label: "This week" },
+            { id: "new", label: "New releases" },
+          ].map((t) => {
+            const href = t.id === "library" ? "/" : `/?feed=${t.id}`;
+            return (
+              <a
+                key={t.id}
+                href={href}
+                className={feed === t.id ? "active" : ""}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate(href);
+                }}
+              >
+                {t.label}
+              </a>
+            );
+          })}
+        </div>
+        {!!data?.count && <span className="count">{data.count.toLocaleString()}</span>}
+      </div>
+
+      {loading && !data ? (
+        <div className="skeleton-grid" aria-label="Loading movies">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="skeleton-card">
+              <div className="skeleton-poster" />
+              <div className="skeleton-line" />
+              <div className="skeleton-line short" />
+            </div>
+          ))}
+        </div>
+      ) : displayError ? (
+        <div className="empty">
+          <h2>
+            {!hasTmdb && feed !== "library" ? "TMDB not configured" : "Couldn’t load catalog"}
+          </h2>
+          <p>{displayError}</p>
+          <div className="empty-actions">
             <a
               className="button"
               href="/settings"
@@ -209,51 +210,53 @@ export function BrowsePage({ search, navigate }: BrowsePageProps) {
                 navigate("/settings");
               }}
             >
-              View setup
+              Settings
             </a>
             <a
-              className="text-link"
+              className="button secondary"
               href="/"
               onClick={(e) => {
                 e.preventDefault();
                 navigate("/");
               }}
             >
-              Browse movies →
+              Library
             </a>
           </div>
-        ) : (
-          <>
-            {data?.stale && (
-              <div className="notice">
-                Showing saved results while the provider is unavailable. Last fetched{" "}
-                {formatTime(data.updatedAt)}.
+        </div>
+      ) : (
+        <>
+          {data?.stale && (
+            <div className="notice">
+              Showing cached results · last updated {formatTime(data.updatedAt)}
+            </div>
+          )}
+          {data?.notice && <p className="notice">{data.notice}</p>}
+
+          <div className="movie-grid">
+            {data?.movies.length ? (
+              data.movies.map((m) => (
+                <MovieCard key={`${m.id}-${m.tmdbId}`} movie={m} navigate={navigate} />
+              ))
+            ) : (
+              <div className="empty">
+                <h2>No movies found</h2>
+                <p>Try a different title, IMDb ID, or genre.</p>
+                <a
+                  className="button"
+                  href="/"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate("/");
+                  }}
+                >
+                  Clear filters
+                </a>
               </div>
             )}
-            {data?.notice && <p className="notice">{data.notice}</p>}
-            <div className="movie-grid">
-              {data?.movies.length ? (
-                data.movies.map((m) => (
-                  <MovieCard key={`${m.id}-${m.tmdbId}`} movie={m} navigate={navigate} />
-                ))
-              ) : (
-                <div className="empty">
-                  <h2>No movies here yet.</h2>
-                  <p>Try a different title, IMDb ID, or filter.</p>
-                  <a
-                    className="button"
-                    href="/"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate("/");
-                    }}
-                  >
-                    Explore the catalog
-                  </a>
-                </div>
-              )}
-            </div>
+          </div>
 
+          {(data?.hasPrev || data?.hasNext) && (
             <div className="pagination">
               {data?.hasPrev && (
                 <a
@@ -267,7 +270,7 @@ export function BrowsePage({ search, navigate }: BrowsePageProps) {
                   ← Previous
                 </a>
               )}
-              {!!data?.page && <span>Page {data.page}</span>}
+              {!!data?.page && <span className="page-num">Page {data.page}</span>}
               {data?.hasNext && (
                 <a
                   className="button secondary"
@@ -281,26 +284,19 @@ export function BrowsePage({ search, navigate }: BrowsePageProps) {
                 </a>
               )}
             </div>
+          )}
 
-            {data?.updatedAt && (
-              <p className="freshness">
-                Catalog checked {formatTime(data.updatedAt)} · Listing does not guarantee a
-                playable source.
-              </p>
-            )}
-          </>
-        )}
-      </section>
-
-      {feed !== "library" && (
-        <div className="attribution">
-          Metadata provided by{" "}
-          <a href="https://www.themoviedb.org/" rel="noreferrer">
-            TMDB
-          </a>
-          . This product uses the TMDB API but is not endorsed or certified by TMDB.
-        </div>
+          {feed !== "library" && (
+            <p className="attribution">
+              Metadata by{" "}
+              <a href="https://www.themoviedb.org/" rel="noreferrer">
+                TMDB
+              </a>
+              .
+            </p>
+          )}
+        </>
       )}
-    </>
+    </div>
   );
 }

@@ -68,7 +68,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
       await client.updateAuthToken({ newToken: trimmed });
       setToken(trimmed);
       setNewToken("");
-      setTokenMsg("Access token updated and saved.");
+      setTokenMsg("Access token updated.");
     } catch (err) {
       setTokenErr(errMessage(err));
     } finally {
@@ -111,29 +111,29 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
   if (restarting) {
     return (
       <section className="settings-page">
-        <h1>Applying network settings…</h1>
-        <p>The client is restarting. This page will refresh settings shortly.</p>
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            setRestarting(false);
-            void loadSettings();
-          }}
-        >
-          Reload settings
-        </button>
+        <div className="empty">
+          <h2>Applying network settings…</h2>
+          <p>The client is restarting and will refresh shortly.</p>
+          <button
+            type="button"
+            className="button"
+            onClick={() => {
+              setRestarting(false);
+              void loadSettings();
+            }}
+          >
+            Reload
+          </button>
+        </div>
       </section>
     );
   }
 
   return (
     <section className="settings-page">
-      <div className="eyebrow">ADMIN SETTINGS</div>
-      <h1>Your local setup.</h1>
-      <p className="subtitle">
-        Manage access lock, catalog configuration, and torrent network bindings.
-      </p>
+      <div className="page-head">
+        <h1>Settings</h1>
+      </div>
 
       {error && (
         <p className="notice" role="alert">
@@ -142,12 +142,13 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
       )}
 
       <div className="settings-grid">
-        <article className="settings-card">
-          <span className="pill">PROTECTED</span>
-          <h2>Access lock</h2>
-          <p>
-            Every ConnectRPC API and media stream requires your token. Change the token or lock
-            the current browser session immediately.
+        <article className="panel-card settings-card">
+          <div className="card-head">
+            <h2>Access lock</h2>
+            <span className="pill">Protected</span>
+          </div>
+          <p className="muted">
+            Change your access token or lock this browser session immediately.
           </p>
           <form onSubmit={handleSaveToken}>
             <div className="token-row">
@@ -159,7 +160,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                 onChange={(e) => setNewToken(e.target.value)}
               />
               <button className="button" type="submit" disabled={savingToken}>
-                {savingToken ? "Saving…" : "Update token"}
+                {savingToken ? "Saving…" : "Update"}
               </button>
             </div>
             {tokenErr && (
@@ -169,62 +170,72 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
             )}
             {tokenMsg && <p className="notice">{tokenMsg}</p>}
           </form>
-          <p>
+          <div className="card-foot">
             <button type="button" className="button secondary" onClick={onLock}>
-              Lock session now
+              Lock session
             </button>
-          </p>
+          </div>
         </article>
 
-        <article className="settings-card">
-          <span className="pill">AVAILABLE</span>
-          <h2>YTS catalog</h2>
-          <p>
-            Movie search, details, posters, and source variants. Results are saved locally in
-            SQLite and refreshed after 15 minutes.
+        <article className="panel-card settings-card">
+          <div className="card-head">
+            <h2>Catalog</h2>
+            <span className="pill">Active</span>
+          </div>
+          <p className="muted">
+            YTS search and details cached locally in SQLite.
           </p>
-          <a
-            className="text-link"
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/");
-            }}
-          >
-            Browse catalog →
-          </a>
+          <div className="card-foot">
+            <a
+              className="text-link"
+              href="/"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/");
+              }}
+            >
+              Browse catalog →
+            </a>
+          </div>
         </article>
 
-        <article className="settings-card">
-          <span className={`pill ${!data?.hasTmdb ? "pending" : ""}`}>
-            {data?.hasTmdb ? "CONFIGURED" : "SETUP NEEDED"}
-          </span>
-          <h2>Worldwide discovery</h2>
-          <p>
-            Trending and new releases use TMDB. Set your API Read Access Token in the server
-            environment, then restart.
+        <article className="panel-card settings-card">
+          <div className="card-head">
+            <h2>TMDB Discovery</h2>
+            <span className={`pill ${!data?.hasTmdb ? "pending" : ""}`}>
+              {data?.hasTmdb ? "Configured" : "Optional"}
+            </span>
+          </div>
+          <p className="muted">
+            Trending and new releases use TMDB. Set <code>TMDB_READ_TOKEN</code> in the server
+            environment to enable.
           </p>
-          <code>TMDB_READ_TOKEN=… AUTH_TOKEN=… go run ./cmd/bigflix</code>
-          <a
-            className="text-link"
-            href="https://www.themoviedb.org/settings/api"
-            rel="noreferrer"
-          >
-            Get a TMDB credential ↗
-          </a>
+          <div className="card-foot">
+            <a
+              className="text-link"
+              href="https://www.themoviedb.org/settings/api"
+              target="_blank"
+              rel="noreferrer"
+            >
+              TMDB API settings ↗
+            </a>
+          </div>
         </article>
       </div>
 
       {loading && !data ? (
-        <p className="notice">Loading network settings…</p>
+        <p className="muted">Loading network interfaces…</p>
       ) : (
         data?.hasEngine && (
-          <form onSubmit={handleSaveNetwork}>
+          <form className="network-section" onSubmit={handleSaveNetwork}>
+            <div className="section-head">
+              <h2>Network interfaces</h2>
+            </div>
+
             {data.allInterfaces && (
               <p className="notice">
-                The current client still uses all interfaces on port {data.actualPort}. Active
-                interfaces with usable addresses are preselected below; save to apply explicit
-                interface selection.
+                Using all interfaces on port {data.actualPort}. Save below to bind specific
+                interfaces.
               </p>
             )}
             {data.errors.map((errText, idx) => (
@@ -232,13 +243,6 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                 {errText}
               </p>
             ))}
-
-            <h2>Network interfaces</h2>
-            <p>
-              Each selected interface uses its own TCP/UDP port. Outgoing peer connections are
-              bound to the selected interfaces. Dynamic mode chooses an available port when the
-              client starts.
-            </p>
 
             <div className="settings-grid">
               {data.interfaces.map((iface) => {
@@ -248,9 +252,9 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                   port: iface.port || 51413,
                 };
                 return (
-                  <article key={iface.name} className="settings-card">
-                    <h3>
-                      <label>
+                  <article key={iface.name} className="panel-card settings-card">
+                    <div className="card-head">
+                      <label className="iface-check">
                         <input
                           type="checkbox"
                           checked={state.selected}
@@ -260,83 +264,82 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                               [iface.name]: { ...state, selected: e.target.checked },
                             }))
                           }
-                        />{" "}
-                        Use {iface.name}
-                      </label>{" "}
-                      · {iface.up ? "Up" : "Down"}
-                    </h3>
+                        />
+                        <strong>{iface.name}</strong>
+                      </label>
+                      <span className={`pill ${iface.up ? "" : "pending"}`}>
+                        {iface.up ? "Up" : "Down"}
+                      </span>
+                    </div>
+
                     {iface.addresses.length ? (
-                      iface.addresses.map((addr) => (
-                        <p key={addr}>
-                          <code>{addr}</code>
-                        </p>
-                      ))
+                      <div className="iface-addrs">
+                        {iface.addresses.map((addr) => (
+                          <code key={addr}>{addr}</code>
+                        ))}
+                      </div>
                     ) : (
                       <p className="muted">No IP address</p>
                     )}
-                    <p>
-                      <label htmlFor={`mode-${iface.name}`}>{iface.name} port mode</label>
-                      <br />
-                      <select
-                        id={`mode-${iface.name}`}
-                        value={state.mode}
-                        onChange={(e) =>
-                          setBindings((prev) => ({
-                            ...prev,
-                            [iface.name]: {
-                              ...state,
-                              mode: e.target.value as "fixed" | "dynamic",
-                            },
-                          }))
-                        }
-                      >
-                        <option value="fixed">Fixed port</option>
-                        <option value="dynamic">Dynamic port</option>
-                      </select>
-                    </p>
-                    <p>
-                      <label htmlFor={`port-${iface.name}`}>{iface.name} fixed port</label>
-                      <br />
-                      <input
-                        id={`port-${iface.name}`}
-                        type="number"
-                        min={1024}
-                        max={65535}
-                        value={state.port}
-                        onChange={(e) =>
-                          setBindings((prev) => ({
-                            ...prev,
-                            [iface.name]: {
-                              ...state,
-                              port: Number(e.target.value) || 51413,
-                            },
-                          }))
-                        }
-                      />
-                    </p>
-                    {iface.listeners.length ? (
-                      iface.listeners.map((l) => (
-                        <p key={l} className="muted">
-                          Listening: <code>{l}</code>
-                        </p>
-                      ))
-                    ) : state.selected ? (
-                      <p className="muted">No active listener</p>
-                    ) : null}
+
+                    <div className="iface-fields">
+                      <label>
+                        Port mode
+                        <select
+                          id={`mode-${iface.name}`}
+                          value={state.mode}
+                          onChange={(e) =>
+                            setBindings((prev) => ({
+                              ...prev,
+                              [iface.name]: {
+                                ...state,
+                                mode: e.target.value as "fixed" | "dynamic",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="fixed">Fixed</option>
+                          <option value="dynamic">Dynamic</option>
+                        </select>
+                      </label>
+                      {state.mode === "fixed" && (
+                        <label>
+                          Port
+                          <input
+                            id={`port-${iface.name}`}
+                            type="number"
+                            min={1024}
+                            max={65535}
+                            value={state.port}
+                            onChange={(e) =>
+                              setBindings((prev) => ({
+                                ...prev,
+                                [iface.name]: {
+                                  ...state,
+                                  port: Number(e.target.value) || 51413,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {iface.listeners.length > 0 && (
+                      <p className="muted iface-listen">
+                        Listening: {iface.listeners.join(", ")}
+                      </p>
+                    )}
                   </article>
                 );
               })}
             </div>
 
-            <p>
+            <div className="network-save">
               <button className="button" type="submit" disabled={savingNet}>
-                {savingNet ? "Saving…" : "Save and restart client"}
+                {savingNet ? "Saving…" : "Save & restart client"}
               </button>
-            </p>
-            <p className="muted">
-              Select at least one interface. Saving briefly interrupts playback; cached downloads
-              and watch positions are retained.
-            </p>
+            </div>
           </form>
         )
       )}

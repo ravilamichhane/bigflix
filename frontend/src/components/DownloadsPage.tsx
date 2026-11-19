@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { client, errMessage, formatBytes } from "../api";
 import type { DownloadStatus } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
+import { PlayIcon, TrashIcon } from "./Icons";
 
 interface DownloadsPageProps {
   navigate: NavigateFn;
@@ -37,7 +38,7 @@ export function DownloadsPage({ navigate }: DownloadsPageProps) {
   async function handleDelete(d: DownloadStatus) {
     if (
       !window.confirm(
-        `Delete "${d.title}" and remove its downloaded files from disk (${formatBytes(d.completed)})?`,
+        `Delete "${d.title}" and remove downloaded files (${formatBytes(d.completed)})?`,
       )
     ) {
       return;
@@ -55,15 +56,11 @@ export function DownloadsPage({ navigate }: DownloadsPageProps) {
   }
 
   return (
-    <>
-      <section className="intro">
-        <div className="eyebrow">YOUR LOCAL LIBRARY</div>
-        <h1>Watch now. Keep for later.</h1>
-        <p>
-          Your downloads continue while you browse. Open a movie to watch its progress and
-          start playback, or delete downloads to free disk space.
-        </p>
-      </section>
+    <div className="downloads-page">
+      <div className="page-head">
+        <h1>Downloads</h1>
+        {downloads.length > 0 && <span className="count">{downloads.length}</span>}
+      </div>
 
       {error && (
         <div className="error-banner" role="alert">
@@ -73,81 +70,74 @@ export function DownloadsPage({ navigate }: DownloadsPageProps) {
 
       {loading ? (
         <div className="empty">
-          <h2>Loading downloads…</h2>
+          <p>Loading…</p>
         </div>
-      ) : (
+      ) : downloads.length ? (
         <div className="download-list">
-          {downloads.length ? (
-            downloads.map((d) => (
-              <div key={d.hash} className="download-row">
-                <a
-                  className="download-row-main"
-                  href={`/watch/${d.hash}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(`/watch/${d.hash}`);
-                  }}
-                >
-                  <div className="download-thumb">
-                    {d.poster ? <img src={d.poster} alt="" loading="lazy" /> : "▶"}
-                  </div>
-                  <div className="download-row-info">
-                    <h2>{d.title}</h2>
-                    <p>
-                      {d.state} · {(d.progress * 100).toFixed(1)}% ·{" "}
-                      {formatBytes(d.completed)} / {formatBytes(d.size)}
-                      {d.keep ? " · Kept" : ""}
-                    </p>
-                    <progress
-                      max={1}
-                      value={d.progress}
-                      aria-label={`${d.title} download progress`}
-                    />
-                    {d.error && <p>{d.error}</p>}
-                  </div>
-                </a>
-                <div className="download-row-actions">
-                  <a
-                    className="text-link"
-                    href={`/watch/${d.hash}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate(`/watch/${d.hash}`);
-                    }}
-                  >
-                    Open player →
-                  </a>
-                  <button
-                    type="button"
-                    className="button danger"
-                    disabled={deletingHash === d.hash}
-                    onClick={() => handleDelete(d)}
-                  >
-                    {deletingHash === d.hash ? "Deleting…" : "Delete"}
-                  </button>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="empty">
-              <h2>A movie night starts here.</h2>
-              <p>Choose a movie and select Watch now or Keep downloaded to start.</p>
+          {downloads.map((d) => (
+            <div key={d.hash} className="download-row">
               <a
-                className="button"
-                href="/"
+                className="download-row-main"
+                href={`/watch/${d.hash}`}
                 onClick={(e) => {
                   e.preventDefault();
-                  navigate("/");
+                  navigate(`/watch/${d.hash}`);
                 }}
               >
-                Browse movies
+                <div className="download-thumb">
+                  {d.poster ? (
+                    <img src={d.poster} alt="" loading="lazy" />
+                  ) : (
+                    <PlayIcon size={18} />
+                  )}
+                </div>
+                <div className="download-row-info">
+                  <h2>{d.title}</h2>
+                  <p className="dl-row-meta">
+                    <span className="dl-state-inline">{d.state}</span>
+                    {" · "}
+                    {(d.progress * 100).toFixed(0)}% · {formatBytes(d.completed)} /{" "}
+                    {formatBytes(d.size)}
+                    {d.speed > 0n ? ` · ${formatBytes(d.speed)}/s` : ""}
+                    {d.keep ? " · Kept" : ""}
+                  </p>
+                  <progress
+                    max={1}
+                    value={d.progress}
+                    aria-label={`${d.title} download progress`}
+                  />
+                  {d.error && <p className="dl-warn">{d.error}</p>}
+                </div>
               </a>
+              <button
+                type="button"
+                className="icon-btn danger-icon"
+                aria-label={`Delete ${d.title}`}
+                title="Delete download"
+                disabled={deletingHash === d.hash}
+                onClick={() => void handleDelete(d)}
+              >
+                <TrashIcon size={17} />
+              </button>
             </div>
-          )}
+          ))}
+        </div>
+      ) : (
+        <div className="empty">
+          <h2>No downloads yet</h2>
+          <p>Pick a movie from Discover to start streaming or downloading.</p>
+          <a
+            className="button"
+            href="/"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/");
+            }}
+          >
+            Browse movies
+          </a>
         </div>
       )}
-
-      <p className="freshness">Live download list · refreshes automatically.</p>
-    </>
+    </div>
   );
 }
