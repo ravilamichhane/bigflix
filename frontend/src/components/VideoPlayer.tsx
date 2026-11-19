@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -10,12 +11,20 @@ import type {
   DownloadStatus,
   ProbeMediaResponse,
 } from "../gen/bigflix/v1/bigflix_pb";
+import {
+  cueContainerStyle,
+  cueLineStyle,
+  loadSubtitleStyle,
+  parseCueLines,
+  saveSubtitleStyle,
+  type SubtitleStyle,
+} from "../subtitleStyle";
 import type { WebkitVideoElement } from "../types";
 import {
   CheckIcon,
+  ChevronDownIcon,
   ExitFullscreenIcon,
   FullscreenIcon,
-  LinkIcon,
   PauseIcon,
   PlayIcon,
   RefreshIcon,
@@ -31,18 +40,56 @@ import { Button } from "./ui";
 interface VideoPlayerProps {
   hash: string;
   latest: DownloadStatus | null;
+  retrySignal?: number;
   onCodecNoteChange?: (note: string) => void;
 }
 
-type QualityMode = "auto" | "1080" | "720";
+type QualityMode = "auto" | "original" | "2160" | "1440" | "1080" | "720" | "480";
+
+interface QualityOption {
+  id: QualityMode;
+  label: string;
+  tag?: string;
+  hint?: string;
+}
 
 const RATES = [0.75, 1, 1.25, 1.5, 2];
-const QUALITIES: QualityMode[] = ["auto", "1080", "720"];
 
-function qualityLabel(q: QualityMode): string {
-  if (q === "1080") return "1080p";
-  if (q === "720") return "720p";
-  return "Auto";
+function tierFromDimensions(w: number, h: number): number {
+  if (w > 2560 || h > 1440) return 2160;
+  if (w > 1920 || h > 1080) return 1440;
+  if (w > 1280 || h > 720) return 1080;
+  if (w > 854 || h > 480) return 720;
+  if (h > 0) return 480;
+  return 0;
+}
+
+function tierFromFilename(latest: DownloadStatus | null): number {
+  if (!latest) return 0;
+  const activeName =
+    latest.files.find((f) => f.index === latest.fileIndex)?.name || latest.title || "";
+  if (/\b(2160p|4k|uhd)\b/i.test(activeName)) return 2160;
+  if (/\b1440p\b/i.test(activeName)) return 1440;
+  if (/\b1080p\b/i.test(activeName)) return 1080;
+  if (/\b720p\b/i.test(activeName)) return 720;
+  if (/\b480p\b/i.test(activeName)) return 480;
+  return 0;
+}
+
+function tierBadge(tier: number): string {
+  if (tier >= 2160) return "4K";
+  if (tier >= 1440) return "1440p";
+  if (tier >= 1080) return "1080p";
+  if (tier >= 720) return "720p";
+  if (tier > 0) return `${tier}p`;
+  return "";
+}
+
+function buttonLabelForQuality(q: QualityMode, detectedTier: number): string {
+  if (q === "auto") return detectedTier ? `Auto · ${tierBadge(detectedTier)}` : "Auto";
+  if (q === "original") return detectedTier ? `Original · ${tierBadge(detectedTier)}` : "Original";
+  if (q === "2160") return "2160p 4K";
+  return `${q}p`;
 }
 
 function formatClock(sec: number): string {
@@ -67,11 +114,17 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array<Arra
   return out;
 }
 
-export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProps) {
+export function VideoPlayer({
+  hash,
+  latest,
+  retrySignal = 0,
+  onCodecNoteChange,
+}: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<WebkitVideoElement | null>(null);
   const scrubRef = useRef<HTMLDivElement | null>(null);
   const subBtnRef = useRef<HTMLButtonElement | null>(null);
+  const qualityMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -88,11 +141,15 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
   const [quality, setQuality] = useState<QualityMode>("auto");
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [subOpenSignal, setSubOpenSignal] = useState(0);
   const [subActive, setSubActive] = useState(false);
-  const [copiedVlc, setCopiedVlc] = useState(false);
+  const [activeCues, setActiveCues] = useState<string[]>([]);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => loadSubtitleStyle());
   const [seekFeedback, setSeekFeedback] = useState<{
     label: string;
     side: "left" | "right" | "center";
@@ -105,6 +162,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   const startedRef = useRef(false);
   const wantPlayRef = useRef(false);
   const qualityRef = useRef<QualityMode>("auto");
+  const qualityOpenRef = useRef(false);
   const savedPositionRef = useRef(0);
   const restoredRef = useRef(false);
   const targetTimeRef = useRef(0);
@@ -139,6 +197,15 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     latestRef.current = latest;
   }, [latest]);
 
+  useEffect(() => {
+    qualityOpenRef.current = qualityOpen;
+  }, [qualityOpen]);
+
+  const handleStyleChange = useCallback((next: SubtitleStyle) => {
+    setSubtitleStyle(next);
+    saveSubtitleStyle(next);
+  }, []);
+
   const showControls = useCallback((keepOpen = false) => {
     setControlsVisible(true);
     if (hideTimerRef.current !== undefined) {
@@ -147,7 +214,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     }
     if (!keepOpen) {
       hideTimerRef.current = window.setTimeout(() => {
-        if (wantPlayRef.current && !scrubbingRef.current) {
+        if (wantPlayRef.current && !scrubbingRef.current && !qualityOpenRef.current) {
           setControlsVisible(false);
         }
       }, 4000);
@@ -163,6 +230,71 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       setSeekFeedback(null);
     }, 650);
   }, []);
+
+  // Detected highest source resolution tier (probe dims > video metadata > filename hint)
+  const detectedTier = useMemo(() => {
+    if (sourceDims) {
+      const t = tierFromDimensions(sourceDims.w, sourceDims.h);
+      if (t > 0) return t;
+    }
+    return tierFromFilename(latest);
+  }, [sourceDims, latest]);
+
+  // Dynamic resolution dropdown list matching the movie's actual resolution
+  const qualityOptions = useMemo<QualityOption[]>(() => {
+    const maxTier = detectedTier || 2160;
+    const opts: QualityOption[] = [
+      {
+        id: "auto",
+        label: "Auto",
+        tag: detectedTier ? tierBadge(detectedTier) : undefined,
+        hint: "Best quality, auto-recovers",
+      },
+      {
+        id: "original",
+        label: "Original",
+        tag: detectedTier ? tierBadge(detectedTier) : undefined,
+        hint: "Untouched source stream",
+      },
+    ];
+    if (maxTier >= 2160) {
+      opts.push({ id: "2160", label: "2160p", tag: "4K", hint: "H.264 Ultra HD" });
+    }
+    if (maxTier >= 1440) {
+      opts.push({ id: "1440", label: "1440p", tag: "QHD", hint: "H.264 High" });
+    }
+    if (maxTier >= 1080) {
+      opts.push({ id: "1080", label: "1080p", tag: "HD", hint: "Smooth Full HD" });
+    }
+    if (maxTier >= 720) {
+      opts.push({ id: "720", label: "720p", tag: "HD", hint: "Fast streaming" });
+    }
+    opts.push({ id: "480", label: "480p", hint: "Data saver" });
+    return opts;
+  }, [detectedTier]);
+
+  // Close quality menu when clicking outside or pressing Escape
+  useEffect(() => {
+    if (!qualityOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
+        setQualityOpen(false);
+        showControls(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setQualityOpen(false);
+        showControls(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [qualityOpen, showControls]);
 
   useEffect(() => {
     if (!latest) return;
@@ -197,12 +329,22 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       }
     }
 
-    if (isReady && !latest.direct && !probePromiseRef.current) {
-      probePromiseRef.current = client.probeMedia({ hash }).catch((e) => {
-        probePromiseRef.current = null;
-        throw e;
-      });
-      probePromiseRef.current.catch(() => {});
+    // Background probe (also gives exact resolution for 4K/1440p/1080p menu options)
+    if (isReady && !probePromiseRef.current) {
+      const p = client
+        .probeMedia({ hash })
+        .then((res) => {
+          if (res.width > 0 && res.height > 0) {
+            setSourceDims({ w: res.width, h: res.height });
+          }
+          return res;
+        })
+        .catch((e) => {
+          probePromiseRef.current = null;
+          throw e;
+        });
+      probePromiseRef.current = p;
+      p.catch(() => {});
     }
   }, [latest, hash, onCodecNoteChange]);
 
@@ -232,10 +374,18 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
   const probe = useCallback((): Promise<ProbeMediaResponse> => {
     if (!probePromiseRef.current) {
-      probePromiseRef.current = client.probeMedia({ hash }).catch((e) => {
-        probePromiseRef.current = null;
-        throw e;
-      });
+      probePromiseRef.current = client
+        .probeMedia({ hash })
+        .then((res) => {
+          if (res.width > 0 && res.height > 0) {
+            setSourceDims({ w: res.width, h: res.height });
+          }
+          return res;
+        })
+        .catch((e) => {
+          probePromiseRef.current = null;
+          throw e;
+        });
     }
     return probePromiseRef.current;
   }, [hash]);
@@ -243,6 +393,14 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   const startPlaybackRef = useRef<
     (fromOverride?: number, qualityOverride?: QualityMode) => Promise<void>
   >(async () => {});
+
+  // External retry trigger from WatchPage panel
+  useEffect(() => {
+    if (retrySignal > 0 && readyRef.current) {
+      const pos = videoRef.current?.currentTime || savedPositionRef.current;
+      void startPlaybackRef.current(pos);
+    }
+  }, [retrySignal]);
 
   useEffect(() => {
     const rawVideo = videoRef.current;
@@ -270,6 +428,9 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     restoredRef.current = false;
     targetTimeRef.current = 0;
     setQuality("auto");
+    setQualityOpen(false);
+    setSourceDims(null);
+    setActiveCues([]);
     setStarted(false);
     setPlaying(false);
     setBuffering(false);
@@ -287,13 +448,12 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         eng.info?.audio ? ", mp4a.40.2" : ""
       }"`;
 
-    // Adaptive MSE buffer limits: 4K / high-res streams use much smaller time windows
-    // so they stay well under browser SourceBuffer memory quotas (~80-150 MB).
     function bufferLimits(): { aheadLimit: number; keepBehind: number } {
-      const highRes =
-        eng.remux === "copy" &&
-        ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920);
-      return highRes
+      const isHighRes =
+        (eng.remux === "copy" &&
+          ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920)) ||
+        (eng.remux === "compat" && eng.compatMaxH >= 1440);
+      return isHighRes
         ? { aheadLimit: 18, keepBehind: 8 }
         : { aheadLimit: 30, keepBehind: 15 };
     }
@@ -356,9 +516,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       }
     }
 
-    // Patient appendBytes: proactively evicts old data, and on QuotaExceededError
-    // NEVER kills the stream — instead frees space or waits for playback to consume
-    // buffered data so high-res 4K streams never silently freeze.
     async function appendBytes(data: Uint8Array<ArrayBuffer>, id: number): Promise<boolean> {
       const { keepBehind } = bufferLimits();
       if (
@@ -381,14 +538,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
           if (!(error instanceof Error) || error.name !== "QuotaExceededError") {
             throw error;
           }
-          // 1. Evict aggressively behind currentTime
           await evict(attempt === 0 ? 4 : 1);
-          // 2. If buffer ahead is large and still full, wait while playback drains it
-          if (attempt >= 2) {
-            await sleep(500);
-          } else {
-            await sleep(150);
-          }
+          await sleep(attempt >= 2 ? 500 : 150);
         }
       }
     }
@@ -404,12 +555,9 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       if (!eng.info || eng.disposed) return;
       eng.remux = "compat";
       eng.compatMaxH = maxH;
-      const capped = maxH > 0 && (eng.info.height > maxH || eng.info.width > (maxH * 16) / 9);
-      const resText = capped ? `≤${maxH}p` : `${eng.info.width}×${eng.info.height}`;
-      onCodecNoteChange?.(
-        reason || `Smooth H.264 playback (${resText}) for stable browser decoding.`,
-      );
-      setStatusText(`Switching to smooth ${capped ? `${maxH}p` : "H.264"}…`);
+      const label = maxH >= 2160 ? "2160p 4K" : maxH > 0 ? `${maxH}p` : "H.264";
+      onCodecNoteChange?.(reason || `H.264 stream (${label}) for stable browser playback.`);
+      setStatusText(`Switching to ${label}…`);
       setBuffering(true);
       restoredRef.current = false;
       const pos = video.currentTime || savedPositionRef.current;
@@ -423,11 +571,10 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       const pos = video.currentTime || savedPositionRef.current;
       savedPositionRef.current = pos;
       setBuffering(true);
-      setStatusText(`Switching to smooth ${maxH}p…`);
+      setStatusText(`Switching to ${maxH}p…`);
       try {
         eng.info = await probe();
       } catch {
-        // Fallback: reload direct stream if probe unavailable (e.g. no ffmpeg).
         restoredRef.current = false;
         video.src = mediaUrl(`/media/${hash}`);
         video.load();
@@ -444,9 +591,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       eng.abort = new AbortController();
       eng.streaming = true;
       eng.streamFrom = from;
-      if (!resume) {
-        targetTimeRef.current = from;
-      }
+      if (!resume) targetTimeRef.current = from;
 
       try {
         await idle();
@@ -553,7 +698,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
             const range = rangeAt(video.currentTime);
             const ahead = range ? range[1] - video.currentTime : 0;
-            // Flush immediately on startup/seek (<3s ahead); coalesce to 512KB once playing.
             const threshold = ahead < 3 ? 0 : 512 * 1024;
 
             if (pendingBytes >= threshold) {
@@ -653,8 +797,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       if (!readyRef.current || !current || eng.disposed) return;
 
       const activeQuality = qualityOverride ?? qualityRef.current;
-      const forceCompatMaxH =
-        activeQuality === "1080" ? 1080 : activeQuality === "720" ? 720 : 0;
+      const numericTier =
+        activeQuality === "auto" || activeQuality === "original" ? 0 : Number(activeQuality);
 
       wantPlayRef.current = true;
       startedRef.current = true;
@@ -669,8 +813,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         savedPositionRef.current = fromOverride;
       }
 
-      // Direct playback when container is browser-native AND user hasn't requested a downscaled smooth tier
-      if (current.direct && forceCompatMaxH === 0) {
+      // Direct playback when container is browser-native AND Auto/Original is selected
+      if (current.direct && numericTier === 0) {
         eng.remux = null;
         eng.compatMaxH = 0;
         eng.session++;
@@ -689,7 +833,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         eng.info = await probe();
       } catch (error) {
         if (eng.disposed) return;
-        // If direct playback is possible and probe failed (e.g. no ffmpeg), fall back to direct
         if (current.direct) {
           eng.remux = null;
           eng.compatMaxH = 0;
@@ -709,10 +852,14 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       }
       if (eng.disposed || !eng.info) return;
 
+      if (eng.info.width > 0 && eng.info.height > 0) {
+        setSourceDims({ w: eng.info.width, h: eng.info.height });
+      }
       const label = `${eng.info.video.toUpperCase()} ${eng.info.width}×${eng.info.height}`;
+
       if (!MS) {
         eng.remux = "compat";
-        eng.compatMaxH = forceCompatMaxH || 1080;
+        eng.compatMaxH = numericTier || 1080;
         restoredRef.current = true;
         onCodecNoteChange?.(`${label} · converted on the fly`);
         video.src = mediaUrl(`/media/${hash}/remux?mode=compat&maxh=${eng.compatMaxH}`);
@@ -721,18 +868,18 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         return;
       }
 
-      if (forceCompatMaxH > 0) {
+      if (numericTier > 0) {
         eng.remux = "compat";
-        eng.compatMaxH = forceCompatMaxH;
+        eng.compatMaxH = numericTier;
       } else {
-        eng.compatMaxH = 1080;
+        eng.compatMaxH = activeQuality === "original" ? 2160 : 1080;
         eng.remux = MS.isTypeSupported(mime("copy")) ? "copy" : "compat";
       }
 
       onCodecNoteChange?.(
         eng.remux === "copy"
           ? `${label} · original quality`
-          : `Smooth H.264 playback (≤${eng.compatMaxH || 1080}p) from ${label}.`,
+          : `H.264 stream (≤${eng.compatMaxH}p) from ${label}.`,
       );
       const from =
         savedPositionRef.current > 0 && savedPositionRef.current < eng.info.duration - 5
@@ -745,11 +892,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
     startPlaybackRef.current = startPlayback;
 
-    // Smart Freeze & Stall Watchdog:
-    // 1. Jumps small MSE gaps (<= 2.5s)
-    // 2. Detects silent high-res decoder freezes (currentTime stops advancing even when !paused)
-    // 3. Detects severe 4K frame drops and auto-switches to smooth 1080p H.264
-    // 4. Recovers wedged direct-stream HTTP byte-range stalls automatically
+    // Smart Freeze & Stall Watchdog
     let lastObservedTime = -1;
     let stalledSince = 0;
     let stallRecoveries = 0;
@@ -767,16 +910,17 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       const now = Date.now();
       const t = video.currentTime;
 
-      // Check if video is actively advancing
       if (!video.paused && lastObservedTime >= 0 && Math.abs(t - lastObservedTime) >= 0.05) {
         lastObservedTime = t;
         stalledSince = 0;
-        if (stallRecoveries > 0 && video.readyState >= 3) {
-          stallRecoveries = 0;
-        }
+        if (stallRecoveries > 0 && video.readyState >= 3) stallRecoveries = 0;
 
-        // Check severe frame-drop choking on high-res video (>1080p) every 4s
-        if (now - dropCheckAt >= 4000 && typeof video.getVideoPlaybackQuality === "function") {
+        // Only auto-downgrade on frame drops when user selected "Auto"
+        if (
+          qualityRef.current === "auto" &&
+          now - dropCheckAt >= 4000 &&
+          typeof video.getVideoPlaybackQuality === "function"
+        ) {
           const q = video.getVideoPlaybackQuality();
           const dTotal = q.totalVideoFrames - lastTotalFrames;
           const dDrop = q.droppedVideoFrames - lastDroppedFrames;
@@ -811,7 +955,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
       const stalledMs = now - stalledSince;
 
-      // After 1.2s stalled: jump small MSE gaps or resume paused-but-ready video
       if (stalledMs >= 1200) {
         if (eng.buffer && eng.buffer.buffered.length > 0 && video.readyState < 3) {
           const inRange = rangeAt(t);
@@ -834,7 +977,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         }
       }
 
-      // After 4.5s truly frozen: actively recover!
       if (stalledMs >= 4500) {
         stalledSince = now;
         stallRecoveries++;
@@ -842,31 +984,27 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
         if (eng.remux === "copy") {
           const hasDataHere = Boolean(rangeAt(t));
-          if (hasDataHere || stallRecoveries >= 2) {
-            // Decoder is stuck despite having buffered frames, or repeated stalls: switch to smooth H.264!
-            useCompat(
-              1080,
-              "High-resolution stream froze · switched to smooth 1080p H.264.",
-            );
+          if (qualityRef.current === "auto" && (hasDataHere || stallRecoveries >= 2)) {
+            useCompat(1080, "High-resolution stream froze · switched to smooth 1080p H.264.");
           } else {
             setStatusText("Recovering stream…");
             void stream(t);
           }
         } else if (eng.remux === "compat") {
           if (
+            qualityRef.current === "auto" &&
             stallRecoveries >= 2 &&
-            eng.compatMaxH !== 720 &&
+            eng.compatMaxH > 720 &&
             ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920)
           ) {
-            useCompat(720, "Stepped down to 720p for smooth uninterrupted playback.");
+            useCompat(720, "Stepped down to 720p for uninterrupted playback.");
           } else {
             setStatusText("Recovering stream…");
             void stream(t);
           }
         } else {
-          // Direct MP4 mode freeze recovery
           const isHighResDirect = video.videoHeight > 1080 || video.videoWidth > 1920;
-          if (stallRecoveries >= 2 && isHighResDirect && MS) {
+          if (qualityRef.current === "auto" && stallRecoveries >= 2 && isHighResDirect && MS) {
             void switchDirectToCompat(
               1080,
               "High-resolution direct playback froze · switched to smooth 1080p.",
@@ -886,6 +1024,9 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const onLoadedMeta = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) {
         setDuration(video.duration);
+      }
+      if (video.videoWidth > 0 && video.videoHeight > 0 && !eng.remux) {
+        setSourceDims({ w: video.videoWidth, h: video.videoHeight });
       }
       if (
         !restoredRef.current &&
@@ -993,14 +1134,12 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const onError = () => {
       if (eng.disposed) return;
       if (eng.remux === "copy" && MS && [3, 4].includes(video.error?.code || 0)) {
-        useCompat(1080);
+        useCompat(qualityRef.current === "original" ? 2160 : 1080);
         return;
       }
       if (!eng.remux && startedRef.current && eng.directRetries < 5) {
         eng.directRetries++;
         savedPositionRef.current = video.currentTime || savedPositionRef.current;
-        // On decode error (code 3) or unsupported source (code 4) in direct MP4,
-        // try smooth H.264 remux right away on second retry!
         if (eng.directRetries >= 2 && [3, 4].includes(video.error?.code || 0) && MS) {
           void switchDirectToCompat(
             1080,
@@ -1028,14 +1167,16 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       setBuffering(false);
       setFatalError(
         video.error?.code === 4
-          ? "Source unavailable or unsupported codec. Try switching to 1080p or retrying."
+          ? "Source unavailable or unsupported codec. Try picking a different resolution or retrying."
           : "Playback interrupted. Check peers and retry.",
       );
       showControls(true);
     };
 
     const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement || video.webkitDisplayingFullscreen));
+      const webkitFs = Boolean(video.webkitDisplayingFullscreen);
+      setNativeFullscreen(webkitFs);
+      setIsFullscreen(Boolean(document.fullscreenElement || webkitFs));
     };
 
     video.addEventListener("loadedmetadata", onLoadedMeta);
@@ -1158,35 +1299,25 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     showControls(false);
   }, [rate, showControls]);
 
-  const cycleQuality = useCallback(() => {
-    const idx = QUALITIES.indexOf(qualityRef.current);
-    const next = QUALITIES[(idx + 1) % QUALITIES.length];
-    qualityRef.current = next;
-    setQuality(next);
-    showControls(false);
-    if (startedRef.current) {
-      const pos = videoRef.current?.currentTime || savedPositionRef.current;
-      void startPlaybackRef.current(pos, next);
-    }
-  }, [showControls]);
+  const selectQuality = useCallback(
+    (next: QualityMode) => {
+      qualityRef.current = next;
+      setQuality(next);
+      setQualityOpen(false);
+      showControls(false);
+      if (startedRef.current) {
+        const pos = videoRef.current?.currentTime || savedPositionRef.current;
+        void startPlaybackRef.current(pos, next);
+      }
+    },
+    [showControls],
+  );
 
   const handleRetry = useCallback(() => {
     const video = videoRef.current;
     const pos = video?.currentTime || savedPositionRef.current;
     void startPlaybackRef.current(pos);
   }, []);
-
-  const handleCopyVlc = useCallback(() => {
-    const url = `${window.location.origin}${mediaUrl(`/media/${hash}`)}`;
-    navigator.clipboard
-      .writeText(url)
-      .then(() => {
-        setCopiedVlc(true);
-        window.setTimeout(() => setCopiedVlc(false), 2000);
-      })
-      .catch(() => {});
-    showControls(false);
-  }, [hash, showControls]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1290,6 +1421,11 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   };
 
   const onSurfaceUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (qualityOpen) {
+      setQualityOpen(false);
+      showControls(false);
+      return;
+    }
     if (!ready) return;
     if (!started) {
       togglePlay();
@@ -1323,7 +1459,13 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     }
   };
 
-  const uiOpen = controlsVisible || !playing || !started || buffering || Boolean(fatalError);
+  const uiOpen =
+    controlsVisible ||
+    qualityOpen ||
+    !playing ||
+    !started ||
+    buffering ||
+    Boolean(fatalError);
   const displayTime = scrubTime ?? currentTime;
   const playedPct = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
   const bufferedPct = duration > 0 ? Math.min(100, (bufferedEndTime / duration) * 100) : 0;
@@ -1336,7 +1478,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         if (e.pointerType === "mouse") showControls(false);
       }}
       onPointerLeave={(e) => {
-        if (e.pointerType === "mouse" && playing && !scrubbingRef.current) {
+        if (e.pointerType === "mouse" && playing && !scrubbingRef.current && !qualityOpen) {
           setControlsVisible(false);
         }
       }}
@@ -1349,45 +1491,88 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         aria-label="Movie player"
       />
 
+      {/* Custom Styled Subtitle Overlay */}
+      {activeCues.length > 0 && !nativeFullscreen && (
+        <div
+          className="kp-subs"
+          style={cueContainerStyle(subtitleStyle, uiOpen)}
+          aria-live="off"
+        >
+          {activeCues.map((cueText, idx) =>
+            parseCueLines(cueText).map((tokens, lineIdx) => (
+              <div key={`${idx}-${lineIdx}`} className="kp-sub-line">
+                <span style={cueLineStyle(subtitleStyle)}>
+                  {tokens.map((tok, tIdx) => {
+                    let node: React.ReactNode = tok.text;
+                    if (tok.underline) node = <u>{node}</u>;
+                    if (tok.italic) node = <em>{node}</em>;
+                    if (tok.bold) node = <strong>{node}</strong>;
+                    return <span key={tIdx}>{node}</span>;
+                  })}
+                </span>
+              </div>
+            )),
+          )}
+        </div>
+      )}
+
       <div className="kp-surface" onPointerUp={onSurfaceUp} />
       <div className="kp-scrim" />
 
-      {/* Top Overlay Bar */}
+      {/* Top Overlay Bar: Status pill + Resolution Dropdown */}
       <div className="kp-top" onClick={(e) => e.stopPropagation()}>
         <span className="kp-status-pill" role="status" aria-live="polite">
           <span className={`kp-status-dot ${playing && !buffering ? "live" : ""}`} />
           {statusText}
         </span>
 
-        <div className="kp-top-actions">
-          <button
-            type="button"
-            className="kp-pill-btn mono"
-            aria-label={`Stream quality ${qualityLabel(quality)}`}
-            title="Switch stream quality (Auto / 1080p / 720p)"
-            onClick={cycleQuality}
-          >
-            {qualityLabel(quality)}
-          </button>
-          <button
-            type="button"
-            className="kp-pill-btn"
-            aria-label="Retry stream"
-            title="Retry stream"
-            onClick={handleRetry}
-          >
-            <RefreshIcon size={13} />
-          </button>
-          <button
-            type="button"
-            className="kp-pill-btn"
-            aria-label="Copy VLC stream link"
-            title="Copy VLC stream link"
-            onClick={handleCopyVlc}
-          >
-            {copiedVlc ? <CheckIcon size={13} /> : <LinkIcon size={13} />}
-            <span>{copiedVlc ? "Copied" : "VLC"}</span>
-          </button>
+        <div className="kp-top-actions" ref={qualityMenuRef}>
+          <div className="kp-dropdown">
+            <button
+              type="button"
+              className="kp-pill-btn mono"
+              aria-haspopup="menu"
+              aria-expanded={qualityOpen}
+              aria-label="Resolution"
+              onClick={() => {
+                setQualityOpen((open) => {
+                  const next = !open;
+                  showControls(next);
+                  return next;
+                });
+              }}
+            >
+              <span>{buttonLabelForQuality(quality, detectedTier)}</span>
+              <ChevronDownIcon size={13} />
+            </button>
+
+            {qualityOpen && (
+              <div className="kp-menu" role="menu" aria-label="Select resolution">
+                {qualityOptions.map((opt) => {
+                  const selected = quality === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={selected}
+                      className={`kp-menu-item ${selected ? "active" : ""}`}
+                      onClick={() => selectQuality(opt.id)}
+                    >
+                      <span className="kp-menu-check">
+                        {selected && <CheckIcon size={13} />}
+                      </span>
+                      <span className="kp-menu-label">
+                        <strong>{opt.label}</strong>
+                        {opt.hint && <small>{opt.hint}</small>}
+                      </span>
+                      {opt.tag && <span className="kp-menu-tag">{opt.tag}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1557,8 +1742,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
               ref={subBtnRef}
               type="button"
               className={`kp-btn ${subActive ? "active" : ""}`}
-              aria-label="Subtitles"
-              title="Subtitles (C)"
+              aria-label="Subtitles & appearance"
+              title="Subtitles & appearance (C)"
               onClick={() => setSubOpenSignal((n) => n + 1)}
             >
               <SubtitlesIcon size={18} />
@@ -1584,6 +1769,10 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         hash={hash}
         video={videoEl}
         openSignal={subOpenSignal}
+        nativeFullscreen={nativeFullscreen}
+        subtitleStyle={subtitleStyle}
+        onStyleChange={handleStyleChange}
+        onCuesChange={setActiveCues}
         onCloseFocus={() => subBtnRef.current?.focus()}
         onActiveChange={setSubActive}
       />

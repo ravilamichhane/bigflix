@@ -5,6 +5,17 @@ import type {
   SubtitleSearchResult,
   SubtitleTrack,
 } from "../gen/bigflix/v1/bigflix_pb";
+import {
+  DEFAULT_SUBTITLE_STYLE,
+  SUB_COLORS,
+  cueLineStyle,
+  type SubBg,
+  type SubColor,
+  type SubFont,
+  type SubPos,
+  type SubSize,
+  type SubtitleStyle,
+} from "../subtitleStyle";
 import { CloseIcon } from "./Icons";
 import { Button } from "./ui";
 
@@ -26,24 +37,46 @@ interface SubtitleDialogProps {
   hash: string;
   video: HTMLVideoElement | null;
   openSignal: number;
+  nativeFullscreen: boolean;
+  subtitleStyle: SubtitleStyle;
+  onStyleChange: (next: SubtitleStyle) => void;
+  onCuesChange: (cues: string[]) => void;
   onCloseFocus?: () => void;
   onActiveChange?: (active: boolean) => void;
+}
+
+function readActiveCueTexts(track: TextTrack | undefined): string[] {
+  if (!track?.activeCues || track.activeCues.length === 0) return [];
+  const out: string[] = [];
+  for (let i = 0; i < track.activeCues.length; i++) {
+    const cue = track.activeCues[i] as VTTCue;
+    if (typeof cue.text === "string" && cue.text.trim()) {
+      out.push(cue.text);
+    }
+  }
+  return out;
 }
 
 export function SubtitleDialog({
   hash,
   video,
   openSignal,
+  nativeFullscreen,
+  subtitleStyle,
+  onStyleChange,
+  onCuesChange,
   onCloseFocus,
   onActiveChange,
 }: SubtitleDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const trackElRef = useRef<HTMLTrackElement | null>(null);
+  const cueListenerCleanupRef = useRef<(() => void) | null>(null);
   const blobUrlRef = useRef<string>("");
   const originalTimesRef = useRef(new WeakMap<TextTrackCue, [number, number]>());
+  const nativeFsRef = useRef(nativeFullscreen);
 
-  const [tab, setTab] = useState<"online" | "saved" | "upload">("online");
+  const [tab, setTab] = useState<"online" | "saved" | "look" | "upload">("online");
   const [language, setLanguage] = useState("en");
   const [tracks, setTracks] = useState<SubtitleTrack[]>([]);
   const [bundled, setBundled] = useState<BundledSubtitleFile[]>([]);
@@ -70,6 +103,13 @@ export function SubtitleDialog({
   });
 
   useEffect(() => {
+    nativeFsRef.current = nativeFullscreen;
+    if (trackElRef.current?.track) {
+      trackElRef.current.track.mode = nativeFullscreen ? "showing" : "hidden";
+    }
+  }, [nativeFullscreen]);
+
+  useEffect(() => {
     try {
       localStorage.setItem(prefKey, JSON.stringify({ id: preferred, offset }));
     } catch {
@@ -77,19 +117,25 @@ export function SubtitleDialog({
     }
   }, [prefKey, preferred, offset]);
 
-  const applyDelay = useCallback((track: TextTrack | undefined, delayVal: number) => {
-    if (!track?.cues) return;
-    for (const cue of Array.from(track.cues)) {
-      if (!originalTimesRef.current.has(cue)) {
-        originalTimesRef.current.set(cue, [cue.startTime, cue.endTime]);
+  const applyDelay = useCallback(
+    (track: TextTrack | undefined, delayVal: number) => {
+      if (!track?.cues) return;
+      for (const cue of Array.from(track.cues)) {
+        if (!originalTimesRef.current.has(cue)) {
+          originalTimesRef.current.set(cue, [cue.startTime, cue.endTime]);
+        }
+        const pair = originalTimesRef.current.get(cue)!;
+        cue.endTime = Math.max(0.001, pair[1] + delayVal);
+        cue.startTime = Math.max(0, Math.min(pair[0] + delayVal, cue.endTime - 0.001));
       }
-      const pair = originalTimesRef.current.get(cue)!;
-      cue.endTime = Math.max(0.001, pair[1] + delayVal);
-      cue.startTime = Math.max(0, Math.min(pair[0] + delayVal, cue.endTime - 0.001));
-    }
-  }, []);
+      onCuesChange(readActiveCueTexts(track));
+    },
+    [onCuesChange],
+  );
 
   const clearTrack = useCallback(() => {
+    cueListenerCleanupRef.current?.();
+    cueListenerCleanupRef.current = null;
     if (trackElRef.current) {
       if (trackElRef.current.track) {
         trackElRef.current.track.mode = "disabled";
@@ -101,7 +147,8 @@ export function SubtitleDialog({
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = "";
     }
-  }, []);
+    onCuesChange([]);
+  }, [onCuesChange]);
 
   const selectTrack = useCallback(
     async (id: string, trackList: SubtitleTrack[], delayVal: number) => {
@@ -125,20 +172,27 @@ export function SubtitleDialog({
         el.label = meta ? `${meta.language} · ${meta.label}` : "Subtitles";
         el.srclang = meta?.language || language;
         el.default = true;
+
+        const syncCues = () => onCuesChange(readActiveCueTexts(el.track));
         el.addEventListener("load", () => {
           applyDelay(el.track, delayVal);
-          el.track.mode = "showing";
+          el.track.mode = nativeFsRef.current ? "showing" : "hidden";
+          syncCues();
         });
         video.appendChild(el);
         trackElRef.current = el;
-        el.track.mode = "showing";
+        el.track.mode = nativeFsRef.current ? "showing" : "hidden";
+        el.track.addEventListener("cuechange", syncCues);
+        cueListenerCleanupRef.current = () => {
+          el.track.removeEventListener("cuechange", syncCues);
+        };
         onActiveChange?.(true);
       } catch (err) {
         onActiveChange?.(false);
         setStatus(errMessage(err));
       }
     },
-    [applyDelay, clearTrack, hash, language, onActiveChange, video],
+    [applyDelay, clearTrack, hash, language, onActiveChange, onCuesChange, video],
   );
 
   const refresh = useCallback(
@@ -171,7 +225,7 @@ export function SubtitleDialog({
     if (!video) return;
     const handleMeta = () => {
       if (trackElRef.current?.track) {
-        trackElRef.current.track.mode = "showing";
+        trackElRef.current.track.mode = nativeFsRef.current ? "showing" : "hidden";
         applyDelay(trackElRef.current.track, offset);
       } else if (preferred && tracks.some((t) => t.id === preferred)) {
         void selectTrack(preferred, tracks, offset);
@@ -255,6 +309,10 @@ export function SubtitleDialog({
     await handleAdd({ action: "upload", data: buf, filename: file.name });
   }
 
+  const updateStyle = (patch: Partial<SubtitleStyle>) => {
+    onStyleChange({ ...subtitleStyle, ...patch });
+  };
+
   return (
     <dialog
       ref={dialogRef}
@@ -289,29 +347,38 @@ export function SubtitleDialog({
         </Button>
       </div>
 
-      <div className="ds-seg" role="group" aria-label="Subtitle sources" style={{ width: "100%" }}>
+      <div
+        className="ds-seg sub-tabs"
+        role="group"
+        aria-label="Subtitle sections"
+      >
         <button
           type="button"
           className="ds-seg-item"
-          style={{ flex: 1 }}
           aria-pressed={tab === "online"}
           onClick={() => setTab("online")}
         >
-          Find online
+          Find
         </button>
         <button
           type="button"
           className="ds-seg-item"
-          style={{ flex: 1 }}
           aria-pressed={tab === "saved"}
           onClick={() => setTab("saved")}
         >
-          Saved &amp; timing
+          Saved
         </button>
         <button
           type="button"
           className="ds-seg-item"
-          style={{ flex: 1 }}
+          aria-pressed={tab === "look"}
+          onClick={() => setTab("look")}
+        >
+          Look
+        </button>
+        <button
+          type="button"
+          className="ds-seg-item"
           aria-pressed={tab === "upload"}
           onClick={() => setTab("upload")}
         >
@@ -420,6 +487,139 @@ export function SubtitleDialog({
             ))}
           </div>
         )}
+      </div>
+
+      <div hidden={tab !== "look"} className="sub-look">
+        <div className="sub-preview-stage" aria-label="Subtitle style preview">
+          <div className="sub-preview-lines">
+            <span style={cueLineStyle(subtitleStyle, true)}>
+              This is how your subtitles look.
+            </span>
+          </div>
+        </div>
+
+        <div className="sub-look-grid">
+          <div className="sub-look-row">
+            <span className="sub-look-label">Size</span>
+            <div className="ds-seg">
+              {(
+                [
+                  { id: "sm", label: "S" },
+                  { id: "md", label: "M" },
+                  { id: "lg", label: "L" },
+                  { id: "xl", label: "XL" },
+                ] as { id: SubSize; label: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className="ds-seg-item"
+                  aria-pressed={subtitleStyle.size === opt.id}
+                  onClick={() => updateStyle({ size: opt.id })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="sub-look-row">
+            <span className="sub-look-label">Color</span>
+            <div className="sub-swatches">
+              {(Object.keys(SUB_COLORS) as SubColor[]).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`sub-swatch ${subtitleStyle.color === key ? "active" : ""}`}
+                  style={{ background: SUB_COLORS[key].hex }}
+                  title={SUB_COLORS[key].label}
+                  aria-label={SUB_COLORS[key].label}
+                  aria-pressed={subtitleStyle.color === key}
+                  onClick={() => updateStyle({ color: key })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="sub-look-row">
+            <span className="sub-look-label">Backdrop</span>
+            <div className="ds-seg">
+              {(
+                [
+                  { id: "outline", label: "Shadow" },
+                  { id: "translucent", label: "Soft" },
+                  { id: "solid", label: "Solid" },
+                ] as { id: SubBg; label: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className="ds-seg-item"
+                  aria-pressed={subtitleStyle.bg === opt.id}
+                  onClick={() => updateStyle({ bg: opt.id })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="sub-look-row">
+            <span className="sub-look-label">Font</span>
+            <div className="ds-seg">
+              {(
+                [
+                  { id: "sans", label: "Sans" },
+                  { id: "serif", label: "Serif" },
+                  { id: "mono", label: "Mono" },
+                ] as { id: SubFont; label: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className="ds-seg-item"
+                  aria-pressed={subtitleStyle.font === opt.id}
+                  onClick={() => updateStyle({ font: opt.id })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="sub-look-row">
+            <span className="sub-look-label">Position</span>
+            <div className="ds-seg">
+              {(
+                [
+                  { id: "low", label: "Low" },
+                  { id: "mid", label: "Mid" },
+                  { id: "high", label: "High" },
+                ] as { id: SubPos; label: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className="ds-seg-item"
+                  aria-pressed={subtitleStyle.position === opt.id}
+                  onClick={() => updateStyle({ position: opt.id })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="sub-look-foot">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onStyleChange(DEFAULT_SUBTITLE_STYLE)}
+          >
+            Reset defaults
+          </Button>
+        </div>
       </div>
 
       <div hidden={tab !== "upload"}>

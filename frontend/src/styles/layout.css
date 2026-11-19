@@ -846,6 +846,16 @@
 }
 
 /* Subtitle Dialog Inner */
+.sub-tabs {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.sub-tabs .ds-seg-item {
+  padding: 0 6px;
+}
+
 .sub-controls {
   display: flex;
   flex-wrap: wrap;
@@ -916,6 +926,86 @@
   margin: 12px 0 0;
   font-size: var(--text-sm);
   color: var(--status-ok);
+}
+
+.sub-look {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: var(--sp-4);
+}
+
+.sub-preview-stage {
+  position: relative;
+  min-height: 92px;
+  padding: 16px 14px;
+  border-radius: var(--r-md);
+  background:
+    radial-gradient(circle at 30% 25%, #2a2620, #0d0c0a 75%);
+  border: 1px solid var(--line-default);
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.sub-preview-lines {
+  line-height: 1.4;
+}
+
+.sub-preview-lines > span {
+  display: inline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  font-weight: 500;
+}
+
+.sub-look-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sub-look-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sub-look-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.sub-swatches {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sub-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  padding: 0;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+.sub-swatch:hover {
+  transform: scale(1.08);
+}
+
+.sub-swatch.active {
+  border-color: var(--surface-0);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.sub-look-foot {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* ==========================================================================

@@ -517,8 +517,139 @@
   margin: 0 4px;
 }
 
+/* Custom Styled Subtitle Overlay */
+.kp-subs {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  z-index: 3;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  transition: bottom 200ms var(--ease);
+}
+
+.kp-sub-line {
+  max-width: 92%;
+  line-height: 1.4;
+}
+
+.kp-sub-line > span {
+  display: inline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  font-weight: 500;
+}
+
+/* Resolution Dropdown Menu */
+.kp-dropdown {
+  position: relative;
+}
+
+.kp-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 210px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: var(--r-md);
+  background: var(--surface-glass-heavy);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kp-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink-1);
+  text-align: left;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.kp-menu-item:hover {
+  background: rgba(245, 242, 235, 0.1);
+}
+
+.kp-menu-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.kp-menu-check {
+  width: 14px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.kp-menu-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.kp-menu-label strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kp-menu-label small {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.kp-menu-item.active .kp-menu-label small {
+  color: rgba(232, 185, 84, 0.78);
+}
+
+.kp-menu-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(245, 242, 235, 0.1);
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+
+.kp-menu-item.active .kp-menu-tag {
+  background: rgba(232, 185, 84, 0.22);
+  color: var(--accent);
+}
+
 /* Mobile Player Layout: clean, spacious, ZERO clipped/vanishing buttons */
 @media (max-width: 768px) {
+  .kp-menu {
+    min-width: 190px;
+    max-height: 145px;
+  }
+
+  .kp-menu-item {
+    padding: 6px 8px;
+  }
+
   .player-stage {
     margin: 0 -14px;
     width: calc(100% + 28px);

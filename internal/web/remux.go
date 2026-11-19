@@ -197,7 +197,7 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	compat := r.URL.Query().Get("mode") == "compat"
 	maxH, _ := strconv.Atoi(r.URL.Query().Get("maxh"))
 	switch maxH {
-	case 720, 1080, 2160:
+	case 480, 720, 1080, 1440, 2160:
 	default:
 		maxH = 0
 	}
@@ -250,9 +250,14 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, "-vf", filter, "-c:v", h264Enc)
 		rate, maxRate, bufSize := "6M", "8M", "12M"
-		if outH > 0 && outH <= 720 {
+		switch {
+		case outH > 0 && outH <= 480:
+			rate, maxRate, bufSize = "1800k", "2500k", "4M"
+		case outH > 0 && outH <= 720:
 			rate, maxRate, bufSize = "3500k", "5M", "8M"
-		} else if outH > 1080 {
+		case outH > 1440:
+			rate, maxRate, bufSize = "16M", "22M", "32M"
+		case outH > 1080:
 			rate, maxRate, bufSize = "10M", "14M", "20M"
 		}
 		if h264Enc == "h264_videotoolbox" {

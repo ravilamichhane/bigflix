@@ -3,7 +3,14 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { client, errMessage, formatBytes, mediaUrl } from "../api";
 import type { DownloadStatus } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
-import { ArrowLeftIcon, DownloadIcon, TrashIcon } from "./Icons";
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  DownloadIcon,
+  LinkIcon,
+  RefreshIcon,
+  TrashIcon,
+} from "./Icons";
 import { VideoPlayer } from "./VideoPlayer";
 import { Badge, Button, EmptyState, ProgressBar } from "./ui";
 
@@ -26,6 +33,8 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
   const [actionBusy, setActionBusy] = useState(false);
   const [selectedFile, setSelectedFile] = useState("");
   const [codecNote, setCodecNote] = useState("");
+  const [copiedVlc, setCopiedVlc] = useState(false);
+  const [retrySignal, setRetrySignal] = useState(0);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -103,6 +112,19 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
     }
   }
 
+  function handleCopyVlc() {
+    const url = `${window.location.origin}${mediaUrl(`/media/${hash}`)}`;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        setCopiedVlc(true);
+        window.setTimeout(() => setCopiedVlc(false), 2000);
+      })
+      .catch(() => {
+        setActionError(`Stream URL: ${url}`);
+      });
+  }
+
   const warningText =
     actionError ||
     latest?.error ||
@@ -138,7 +160,12 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
       ) : (
         <>
           <div className="player-stage">
-            <VideoPlayer hash={hash} latest={latest} onCodecNoteChange={setCodecNote} />
+            <VideoPlayer
+              hash={hash}
+              latest={latest}
+              retrySignal={retrySignal}
+              onCodecNoteChange={setCodecNote}
+            />
           </div>
 
           {latest?.state === "select-file" && (
@@ -205,6 +232,23 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
             )}
 
             <div className="dl-actions">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!latest}
+                onClick={handleCopyVlc}
+              >
+                {copiedVlc ? <CheckIcon size={14} /> : <LinkIcon size={14} />}
+                {copiedVlc ? "VLC link copied" : "Copy VLC link"}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!latest}
+                onClick={() => setRetrySignal((n) => n + 1)}
+              >
+                <RefreshIcon size={14} /> Retry player
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
