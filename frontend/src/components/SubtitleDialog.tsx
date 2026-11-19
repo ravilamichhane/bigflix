@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { client, errMessage } from "../api";
 import type {
   BundledSubtitleFile,
+  EmbeddedSubtitleTrack,
   SubtitleSearchResult,
   SubtitleTrack,
 } from "../gen/bigflix/v1/bigflix_pb";
@@ -17,7 +18,7 @@ import {
   type SubtitleStyle,
 } from "../subtitleStyle";
 import { CloseIcon } from "./Icons";
-import { Button } from "./ui";
+import { Badge, Button } from "./ui";
 
 const LANGUAGES = [
   { value: "en", label: "English" },
@@ -75,14 +76,18 @@ export function SubtitleDialog({
   const blobUrlRef = useRef<string>("");
   const originalTimesRef = useRef(new WeakMap<TextTrackCue, [number, number]>());
   const nativeFsRef = useRef(nativeFullscreen);
+  const userPickedTabRef = useRef(false);
 
-  const [tab, setTab] = useState<"online" | "saved" | "look" | "upload">("online");
+  const [tab, setTab] = useState<"tracks" | "online" | "look" | "upload">("tracks");
   const [language, setLanguage] = useState("en");
   const [tracks, setTracks] = useState<SubtitleTrack[]>([]);
+  const [embedded, setEmbedded] = useState<EmbeddedSubtitleTrack[]>([]);
   const [bundled, setBundled] = useState<BundledSubtitleFile[]>([]);
   const [results, setResults] = useState<SubtitleSearchResult[]>([]);
   const [status, setStatus] = useState("");
+  const [statusError, setStatusError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [extractingStream, setExtractingStream] = useState<number | null>(null);
 
   const prefKey = `bigflix-subtitles-${hash}`;
   const [preferred, setPreferred] = useState<string>(() => {
@@ -189,6 +194,7 @@ export function SubtitleDialog({
         onActiveChange?.(true);
       } catch (err) {
         onActiveChange?.(false);
+        setStatusError(true);
         setStatus(errMessage(err));
       }
     },
@@ -196,16 +202,25 @@ export function SubtitleDialog({
   );
 
   const refresh = useCallback(
-    async (selectedId?: string) => {
+    async (selectedId?: string, autoSelect = true) => {
       try {
         const data = await client.listSubtitles({ hash });
         setTracks(data.tracks);
+        setEmbedded(data.embedded);
         setBundled(data.bundled);
-        const target = selectedId !== undefined ? selectedId : preferred;
-        if (target && data.tracks.some((t) => t.id === target)) {
-          await selectTrack(target, data.tracks, offset);
+        if (!userPickedTabRef.current) {
+          const hasLocal =
+            data.tracks.length > 0 || data.embedded.length > 0 || data.bundled.length > 0;
+          setTab(hasLocal ? "tracks" : "online");
+        }
+        if (autoSelect) {
+          const target = selectedId !== undefined ? selectedId : preferred;
+          if (target && data.tracks.some((t) => t.id === target)) {
+            await selectTrack(target, data.tracks, offset);
+          }
         }
       } catch (err) {
+        setStatusError(true);
         setStatus(errMessage(err));
       }
     },
@@ -214,6 +229,7 @@ export function SubtitleDialog({
 
   useEffect(() => {
     if (!video) return;
+    userPickedTabRef.current = false;
     void refresh();
     return () => {
       clearTrack();
@@ -235,14 +251,23 @@ export function SubtitleDialog({
     return () => video.removeEventListener("loadedmetadata", handleMeta);
   }, [video, preferred, tracks, offset, applyDelay, selectTrack]);
 
+  // Refresh subtitle list (including newly probed built-in tracks) whenever opened
   useEffect(() => {
     if (openSignal > 0 && dialogRef.current && !dialogRef.current.open) {
       dialogRef.current.showModal();
+      void refresh(undefined, false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openSignal]);
+
+  function chooseTab(next: "tracks" | "online" | "look" | "upload") {
+    userPickedTabRef.current = true;
+    setTab(next);
+  }
 
   async function handleSearch() {
     setBusy(true);
+    setStatusError(false);
     setStatus("Searching YIFY Subtitles…");
     setResults([]);
     try {
@@ -254,6 +279,7 @@ export function SubtitleDialog({
           : "No new subtitles found for this language.",
       );
     } catch (err) {
+      setStatusError(true);
       setStatus(errMessage(err));
     } finally {
       setBusy(false);
@@ -267,14 +293,21 @@ export function SubtitleDialog({
     index?: number;
     data?: Uint8Array;
     filename?: string;
+    lang?: string;
   }) {
     setBusy(true);
-    setStatus("Loading subtitle…");
+    setStatusError(false);
+    if (params.action === "embedded" && params.index !== undefined) {
+      setExtractingStream(params.index);
+      setStatus("Extracting built-in subtitle…");
+    } else {
+      setStatus("Loading subtitle…");
+    }
     try {
       const res = await client.addSubtitle({
         hash,
         action: params.action,
-        language,
+        language: params.lang || language,
         id: params.id || 0,
         label: params.label || "",
         index: params.index || 0,
@@ -282,26 +315,30 @@ export function SubtitleDialog({
         filename: params.filename || "",
       });
       if (res.track) {
-        await refresh(res.track.id);
+        await refresh(res.track.id, true);
         if (params.action === "download" && params.id) {
           setResults((prev) => prev.filter((r) => r.id !== params.id));
         }
         setStatus(`Active: ${res.track.label}`);
       }
     } catch (err) {
+      setStatusError(true);
       setStatus(errMessage(err));
     } finally {
       setBusy(false);
+      setExtractingStream(null);
     }
   }
 
   async function handleUpload() {
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
+      setStatusError(true);
       setStatus("Choose an SRT or VTT file first.");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
+      setStatusError(true);
       setStatus("Subtitle must be at most 2 MB.");
       return;
     }
@@ -312,6 +349,8 @@ export function SubtitleDialog({
   const updateStyle = (patch: Partial<SubtitleStyle>) => {
     onStyleChange({ ...subtitleStyle, ...patch });
   };
+
+  const localCount = embedded.length + bundled.length;
 
   return (
     <dialog
@@ -355,24 +394,24 @@ export function SubtitleDialog({
         <button
           type="button"
           className="ds-seg-item"
+          aria-pressed={tab === "tracks"}
+          onClick={() => chooseTab("tracks")}
+        >
+          Tracks{localCount > 0 ? ` (${localCount})` : ""}
+        </button>
+        <button
+          type="button"
+          className="ds-seg-item"
           aria-pressed={tab === "online"}
-          onClick={() => setTab("online")}
+          onClick={() => chooseTab("online")}
         >
           Find
         </button>
         <button
           type="button"
           className="ds-seg-item"
-          aria-pressed={tab === "saved"}
-          onClick={() => setTab("saved")}
-        >
-          Saved
-        </button>
-        <button
-          type="button"
-          className="ds-seg-item"
           aria-pressed={tab === "look"}
-          onClick={() => setTab("look")}
+          onClick={() => chooseTab("look")}
         >
           Look
         </button>
@@ -380,12 +419,124 @@ export function SubtitleDialog({
           type="button"
           className="ds-seg-item"
           aria-pressed={tab === "upload"}
-          onClick={() => setTab("upload")}
+          onClick={() => chooseTab("upload")}
         >
           Upload
         </button>
       </div>
 
+      {/* Tracks Tab: Active Track + Timing + Built-in & Bundled Subtitles */}
+      <div hidden={tab !== "tracks"}>
+        <div className="sub-controls">
+          <label>
+            Active track
+            <select
+              className="ds-select"
+              value={preferred}
+              onChange={(e) => void selectTrack(e.target.value, tracks, offset)}
+            >
+              <option value="">Off</option>
+              {tracks.map((sub) => (
+                <option key={sub.id} value={sub.id}>
+                  {sub.language} · {sub.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="sub-offset">
+            Offset (sec)
+            <input
+              id="subtitle-delay"
+              className="ds-input mono"
+              type="number"
+              min={-120}
+              max={120}
+              step={0.5}
+              value={offset}
+              onChange={(e) => {
+                const next = Math.max(-120, Math.min(120, Number(e.target.value) || 0));
+                setOffset(next);
+                applyDelay(trackElRef.current?.track, next);
+              }}
+            />
+          </label>
+        </div>
+
+        {embedded.length > 0 && (
+          <div className="sub-section">
+            <div className="sub-section-head">
+              <h3>Built-in subtitles</h3>
+              <Badge className="mono">{embedded.length}</Badge>
+            </div>
+            <div className="sub-results">
+              {embedded.map((item) => {
+                const isExtracting = extractingStream === item.streamIndex;
+                return (
+                  <div key={item.streamIndex} className="sub-row">
+                    <div className="sub-row-info">
+                      <span>{item.label}</span>
+                      <div className="sub-badges">
+                        <small>{item.codec}</small>
+                        {item.isDefault && <Badge tone="accent">Default</Badge>}
+                        {item.hearingImpaired && <Badge>SDH</Badge>}
+                        {item.forced && <Badge>Forced</Badge>}
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        void handleAdd({
+                          action: "embedded",
+                          index: item.streamIndex,
+                          label: item.label,
+                          lang:
+                            item.language && item.language !== "und"
+                              ? item.language
+                              : language,
+                        })
+                      }
+                    >
+                      {isExtracting ? "Extracting…" : "Use"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {bundled.length > 0 && (
+          <div className="sub-section">
+            <div className="sub-section-head">
+              <h3>Torrent subtitle files</h3>
+              <Badge className="mono">{bundled.length}</Badge>
+            </div>
+            <div className="sub-bundled">
+              {bundled.map((file) => (
+                <Button
+                  key={file.index}
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void handleAdd({ action: "bundled", index: file.index })}
+                >
+                  Use {file.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {embedded.length === 0 && bundled.length === 0 && tracks.length === 0 && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            No built-in or saved subtitles found yet. Use the Find or Upload tab to add one.
+          </p>
+        )}
+      </div>
+
+      {/* Find Online Tab */}
       <div hidden={tab !== "online"}>
         <div className="sub-controls">
           <label>
@@ -436,59 +587,7 @@ export function SubtitleDialog({
         </div>
       </div>
 
-      <div hidden={tab !== "saved"}>
-        <div className="sub-controls">
-          <label>
-            Active track
-            <select
-              className="ds-select"
-              value={preferred}
-              onChange={(e) => void selectTrack(e.target.value, tracks, offset)}
-            >
-              <option value="">Off</option>
-              {tracks.map((sub) => (
-                <option key={sub.id} value={sub.id}>
-                  {sub.language} · {sub.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="sub-offset">
-            Offset (sec)
-            <input
-              id="subtitle-delay"
-              className="ds-input mono"
-              type="number"
-              min={-120}
-              max={120}
-              step={0.5}
-              value={offset}
-              onChange={(e) => {
-                const next = Math.max(-120, Math.min(120, Number(e.target.value) || 0));
-                setOffset(next);
-                applyDelay(trackElRef.current?.track, next);
-              }}
-            />
-          </label>
-        </div>
-        <p className="muted">Positive delays subtitles; negative shows them earlier.</p>
-        {bundled.length > 0 && (
-          <div className="sub-bundled">
-            {bundled.map((file) => (
-              <Button
-                key={file.index}
-                variant="secondary"
-                size="sm"
-                disabled={busy}
-                onClick={() => void handleAdd({ action: "bundled", index: file.index })}
-              >
-                Use {file.name}
-              </Button>
-            ))}
-          </div>
-        )}
-      </div>
-
+      {/* Look (Appearance) Tab */}
       <div hidden={tab !== "look"} className="sub-look">
         <div className="sub-preview-stage" aria-label="Subtitle style preview">
           <div className="sub-preview-lines">
@@ -622,6 +721,7 @@ export function SubtitleDialog({
         </div>
       </div>
 
+      {/* Upload Tab */}
       <div hidden={tab !== "upload"}>
         <div className="sub-controls">
           <label>
@@ -641,7 +741,11 @@ export function SubtitleDialog({
       </div>
 
       {status && (
-        <p className="sub-status" role="status" aria-live="polite">
+        <p
+          className={`sub-status ${statusError ? "sub-status-warn" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
           {status}
         </p>
       )}

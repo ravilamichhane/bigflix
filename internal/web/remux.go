@@ -2,10 +2,13 @@ package web
 
 import (
 	"bigflix/internal/downloads"
+	"bigflix/internal/subtitles"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,14 +20,25 @@ import (
 	"time"
 )
 
+type embeddedSubtitle struct {
+	StreamIndex     int    `json:"stream_index"`
+	Language        string `json:"language"`
+	Label           string `json:"label"`
+	Codec           string `json:"codec"`
+	Default         bool   `json:"default"`
+	Forced          bool   `json:"forced"`
+	HearingImpaired bool   `json:"hearing_impaired"`
+}
+
 // Media probe results for containers the browser cannot open directly.
 type mediaProbe struct {
-	Duration float64 `json:"duration"`
-	Video    string  `json:"video"`
-	Codecs   string  `json:"codecs"`
-	Width    int     `json:"width"`
-	Height   int     `json:"height"`
-	Audio    string  `json:"audio"`
+	Duration  float64            `json:"duration"`
+	Video     string             `json:"video"`
+	Codecs    string             `json:"codecs"`
+	Width     int                `json:"width"`
+	Height    int                `json:"height"`
+	Audio     string             `json:"audio"`
+	Subtitles []embeddedSubtitle `json:"subtitles,omitempty"`
 }
 
 var (
@@ -108,7 +122,7 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 	pctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(pctx, ffprobe, "-v", "error", "-rw_timeout", "60000000",
-		"-show_entries", "format=duration:stream=codec_type,codec_name,profile,width,height,level",
+		"-show_entries", "format=duration:stream=index,codec_type,codec_name,profile,width,height,level:stream_tags=language,title:stream_disposition=default,forced,hearing_impaired",
 		"-of", "json", src).Output()
 	if err != nil {
 		return mediaProbe{}, errProbeWait
@@ -118,11 +132,22 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 			Duration string `json:"duration"`
 		} `json:"format"`
 		Streams []struct {
-			Type, Codec, Profile string
-			Width, Height, Level int
+			Index       int               `json:"index"`
+			Type        string            `json:"codec_type"`
+			Codec       string            `json:"codec_name"`
+			Profile     string            `json:"profile"`
+			Width       int               `json:"width"`
+			Height      int               `json:"height"`
+			Level       int               `json:"level"`
+			Tags        map[string]string `json:"tags"`
+			Disposition struct {
+				Default         int `json:"default"`
+				Forced          int `json:"forced"`
+				HearingImpaired int `json:"hearing_impaired"`
+			} `json:"disposition"`
 		} `json:"streams"`
 	}
-	if err := json.Unmarshal(fixKeys(out), &raw); err != nil {
+	if err := json.Unmarshal(out, &raw); err != nil {
 		return mediaProbe{}, errProbeDecode
 	}
 	p.Duration, _ = strconv.ParseFloat(raw.Format.Duration, 64)
@@ -133,6 +158,20 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 			p.Codecs = codecString(st.Codec, st.Profile, st.Level)
 		case st.Type == "audio" && p.Audio == "":
 			p.Audio = st.Codec
+		case st.Type == "subtitle" && isTextSubtitleCodec(st.Codec):
+			langRaw := tagCaseInsensitive(st.Tags, "language")
+			title := strings.TrimSpace(tagCaseInsensitive(st.Tags, "title"))
+			code, langName := normalizeSubLang(langRaw)
+			label := buildEmbeddedSubLabel(langName, title, st.Index, st.Disposition.Forced == 1, st.Disposition.HearingImpaired == 1)
+			p.Subtitles = append(p.Subtitles, embeddedSubtitle{
+				StreamIndex:     st.Index,
+				Language:        code,
+				Label:           label,
+				Codec:           st.Codec,
+				Default:         st.Disposition.Default == 1,
+				Forced:          st.Disposition.Forced == 1,
+				HearingImpaired: st.Disposition.HearingImpaired == 1,
+			})
 		}
 	}
 	probeMu.Lock()
@@ -141,9 +180,194 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 	return p, nil
 }
 
-// fixKeys maps ffprobe's snake_case keys onto the anonymous struct fields.
-func fixKeys(b []byte) []byte {
-	return []byte(strings.NewReplacer(`"codec_type"`, `"Type"`, `"codec_name"`, `"Codec"`).Replace(string(b)))
+func tagCaseInsensitive(tags map[string]string, key string) string {
+	for k, v := range tags {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}
+
+func isTextSubtitleCodec(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "ttml",
+		"sami", "microdvd", "realtext", "jacosub", "mpl2", "pjs", "stl",
+		"subviewer", "subviewer1", "vplayer", "eia_608", "eia_708":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeSubLang(raw string) (code, name string) {
+	c := strings.ToLower(strings.TrimSpace(raw))
+	switch c {
+	case "en", "eng":
+		return "en", "English"
+	case "es", "spa":
+		return "es", "Spanish"
+	case "fr", "fre", "fra":
+		return "fr", "French"
+	case "de", "ger", "deu":
+		return "de", "German"
+	case "hi", "hin":
+		return "hi", "Hindi"
+	case "ne", "nep":
+		return "ne", "Nepali"
+	case "pt", "por", "pt-br":
+		return "pt-br", "Portuguese"
+	case "ar", "ara":
+		return "ar", "Arabic"
+	case "ja", "jpn":
+		return "ja", "Japanese"
+	case "ko", "kor":
+		return "ko", "Korean"
+	case "zh", "zho", "chi", "zh-cn":
+		return "zh-cn", "Chinese"
+	case "it", "ita":
+		return "it", "Italian"
+	case "ru", "rus":
+		return "ru", "Russian"
+	case "nl", "dut", "nld":
+		return "nl", "Dutch"
+	case "pl", "pol":
+		return "pl", "Polish"
+	case "tr", "tur":
+		return "tr", "Turkish"
+	case "sv", "swe":
+		return "sv", "Swedish"
+	case "no", "nor", "nob":
+		return "no", "Norwegian"
+	case "da", "dan":
+		return "da", "Danish"
+	case "fi", "fin":
+		return "fi", "Finnish"
+	case "id", "ind":
+		return "id", "Indonesian"
+	case "vi", "vie":
+		return "vi", "Vietnamese"
+	case "th", "tha":
+		return "th", "Thai"
+	case "", "und":
+		return "und", "Unknown"
+	default:
+		if subtitles.ValidLanguage(c) {
+			return c, strings.ToUpper(c)
+		}
+		return "und", "Unknown"
+	}
+}
+
+func buildEmbeddedSubLabel(langName, title string, streamIndex int, forced, sdh bool) string {
+	var base string
+	switch {
+	case title != "" && langName != "" && langName != "Unknown" && !strings.Contains(strings.ToLower(title), strings.ToLower(langName)):
+		base = langName + " · " + title
+	case title != "":
+		base = title
+	case langName != "" && langName != "Unknown":
+		base = langName
+	default:
+		base = fmt.Sprintf("Track #%d", streamIndex)
+	}
+	if sdh && !strings.Contains(strings.ToLower(base), "sdh") {
+		base += " · SDH"
+	}
+	if forced && !strings.Contains(strings.ToLower(base), "forced") {
+		base += " · Forced"
+	}
+	return base
+}
+
+func (a *App) cachedEmbeddedSubtitles(ctx context.Context, hash string) []embeddedSubtitle {
+	s, _, err := a.remuxSourceCtx(ctx, hash)
+	if err != nil || s.Size <= 0 || s.Paused {
+		return nil
+	}
+	key := fmt.Sprintf("%s/%d", s.Hash, s.FileIndex)
+	probeMu.Lock()
+	p, cached := probeCache[key]
+	probeMu.Unlock()
+	if cached {
+		return p.Subtitles
+	}
+	// Quick opportunistic probe so built-in subtitles appear even before pressing Play.
+	pctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	p, err = a.probeMedia(pctx, hash)
+	if err != nil {
+		return nil
+	}
+	return p.Subtitles
+}
+
+func (a *App) extractEmbeddedSubtitle(ctx context.Context, hash string, streamIndex int) (embeddedSubtitle, []byte, error) {
+	s, src, err := a.remuxSourceCtx(ctx, hash)
+	if err != nil {
+		return embeddedSubtitle{}, nil, err
+	}
+	p, err := a.probeMedia(ctx, hash)
+	if err != nil {
+		return embeddedSubtitle{}, nil, err
+	}
+	var target *embeddedSubtitle
+	for i := range p.Subtitles {
+		if p.Subtitles[i].StreamIndex == streamIndex {
+			target = &p.Subtitles[i]
+			break
+		}
+	}
+	if target == nil {
+		return embeddedSubtitle{}, nil, errors.New("built-in subtitle track not found")
+	}
+
+	timeout := 35 * time.Second
+	if s.Size > 0 && s.Completed >= s.Size {
+		timeout = 90 * time.Second
+	}
+	ectx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-rw_timeout", "30000000",
+		"-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
+		"-i", src,
+		"-map", fmt.Sprintf("0:%d", target.StreamIndex),
+		"-vn", "-an", "-dn",
+		"-c:s", "webvtt",
+		"-f", "webvtt",
+		"pipe:1",
+	}
+	cmd := exec.CommandContext(ectx, downloads.FFmpeg, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return embeddedSubtitle{}, nil, errors.New("unable to start subtitle extraction")
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return embeddedSubtitle{}, nil, errors.New("unable to start subtitle extraction")
+	}
+	var buf bytes.Buffer
+	_, readErr := io.Copy(&buf, io.LimitReader(stdout, subtitles.MaxSize+1))
+	waitErr := cmd.Wait()
+
+	if readErr != nil || waitErr != nil {
+		if ectx.Err() == context.DeadlineExceeded && s.Completed < s.Size {
+			return embeddedSubtitle{}, nil, fmt.Errorf(
+				"built-in subtitles are interleaved through the video and need the download to finish first (currently %.0f%%) — or search online",
+				s.Progress*100,
+			)
+		}
+		slog.Warn("embedded subtitle extraction failed", "hash", s.Hash, "stream", streamIndex, "error", waitErr, "stderr", stderr.String())
+		return embeddedSubtitle{}, nil, errors.New("could not extract built-in subtitle track")
+	}
+	if buf.Len() > subtitles.MaxSize {
+		return embeddedSubtitle{}, nil, errors.New("built-in subtitle track exceeds 2 MB limit")
+	}
+	return *target, buf.Bytes(), nil
 }
 
 func codecString(codec, profile string, level int) string {

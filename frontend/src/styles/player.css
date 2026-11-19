@@ -90,7 +90,7 @@
   top: 0;
   left: 0;
   right: 0;
-  z-index: 5;
+  z-index: 8;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -642,12 +642,16 @@
 /* Mobile Player Layout: clean, spacious, ZERO clipped/vanishing buttons */
 @media (max-width: 768px) {
   .kp-menu {
-    min-width: 190px;
-    max-height: 145px;
+    min-width: 176px;
+    max-height: 158px;
   }
 
   .kp-menu-item {
-    padding: 6px 8px;
+    padding: 7px 9px;
+  }
+
+  .kp-menu-label small {
+    display: none;
   }
 
   .player-stage {

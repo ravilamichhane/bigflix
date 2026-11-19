@@ -223,6 +223,16 @@ message BundledSubtitleFile {
   string name = 2;
 }
 
+message EmbeddedSubtitleTrack {
+  int32 stream_index = 1;
+  string language = 2;
+  string label = 3;
+  string codec = 4;
+  bool is_default = 5;
+  bool forced = 6;
+  bool hearing_impaired = 7;
+}
+
 message SubtitleSearchResult {
   int32 id = 1;
   string language = 2;
@@ -240,6 +250,7 @@ message ListSubtitlesResponse {
   repeated SubtitleTrack tracks = 1;
   repeated BundledSubtitleFile bundled = 2;
   bool configured = 3;
+  repeated EmbeddedSubtitleTrack embedded = 4;
 }
 
 message GetSubtitleRequest {

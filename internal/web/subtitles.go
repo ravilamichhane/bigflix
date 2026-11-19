@@ -49,10 +49,24 @@ func (a *App) ListSubtitles(ctx context.Context, req *connect.Request[bigflixv1.
 			Name:  f.Name,
 		})
 	}
+	embeddedTracks := a.cachedEmbeddedSubtitles(ctx, hash)
+	embedded := make([]*bigflixv1.EmbeddedSubtitleTrack, 0, len(embeddedTracks))
+	for _, e := range embeddedTracks {
+		embedded = append(embedded, &bigflixv1.EmbeddedSubtitleTrack{
+			StreamIndex:     int32(e.StreamIndex),
+			Language:        e.Language,
+			Label:           e.Label,
+			Codec:           e.Codec,
+			IsDefault:       e.Default,
+			Forced:          e.Forced,
+			HearingImpaired: e.HearingImpaired,
+		})
+	}
 	return connect.NewResponse(&bigflixv1.ListSubtitlesResponse{
 		Tracks:     tracks,
 		Bundled:    bundled,
 		Configured: true,
+		Embedded:   embedded,
 	}), nil
 }
 
@@ -140,6 +154,26 @@ func (a *App) AddSubtitle(ctx context.Context, req *connect.Request[bigflixv1.Ad
 			return nil, connect.NewError(connect.CodeUnavailable, errors.New("subtitle pieces unavailable; retry when peers connect"))
 		}
 		sub, err := subtitles.Save(ctx, s.DB, hash, label, language, b)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		return connect.NewResponse(&bigflixv1.AddSubtitleResponse{
+			Track: &bigflixv1.SubtitleTrack{Id: sub.ID, Label: sub.Label, Language: sub.Language},
+		}), nil
+	case "embedded":
+		track, vtt, err := a.extractEmbeddedSubtitle(ctx, hash, int(req.Msg.Index))
+		if err != nil {
+			if errors.Is(err, errFFmpegMissing) {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+			}
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
+		lang := track.Language
+		if !subtitles.ValidLanguage(lang) || lang == "und" {
+			lang = language
+		}
+		label := "Built-in · " + track.Label
+		sub, err := subtitles.Save(ctx, s.DB, hash, label, lang, vtt)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}

@@ -1957,6 +1957,98 @@ func (x *BundledSubtitleFile) GetName() string {
 	return ""
 }
 
+type EmbeddedSubtitleTrack struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	StreamIndex     int32                  `protobuf:"varint,1,opt,name=stream_index,json=streamIndex,proto3" json:"stream_index,omitempty"`
+	Language        string                 `protobuf:"bytes,2,opt,name=language,proto3" json:"language,omitempty"`
+	Label           string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	Codec           string                 `protobuf:"bytes,4,opt,name=codec,proto3" json:"codec,omitempty"`
+	IsDefault       bool                   `protobuf:"varint,5,opt,name=is_default,json=isDefault,proto3" json:"is_default,omitempty"`
+	Forced          bool                   `protobuf:"varint,6,opt,name=forced,proto3" json:"forced,omitempty"`
+	HearingImpaired bool                   `protobuf:"varint,7,opt,name=hearing_impaired,json=hearingImpaired,proto3" json:"hearing_impaired,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *EmbeddedSubtitleTrack) Reset() {
+	*x = EmbeddedSubtitleTrack{}
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EmbeddedSubtitleTrack) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EmbeddedSubtitleTrack) ProtoMessage() {}
+
+func (x *EmbeddedSubtitleTrack) ProtoReflect() protoreflect.Message {
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EmbeddedSubtitleTrack.ProtoReflect.Descriptor instead.
+func (*EmbeddedSubtitleTrack) Descriptor() ([]byte, []int) {
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *EmbeddedSubtitleTrack) GetStreamIndex() int32 {
+	if x != nil {
+		return x.StreamIndex
+	}
+	return 0
+}
+
+func (x *EmbeddedSubtitleTrack) GetLanguage() string {
+	if x != nil {
+		return x.Language
+	}
+	return ""
+}
+
+func (x *EmbeddedSubtitleTrack) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *EmbeddedSubtitleTrack) GetCodec() string {
+	if x != nil {
+		return x.Codec
+	}
+	return ""
+}
+
+func (x *EmbeddedSubtitleTrack) GetIsDefault() bool {
+	if x != nil {
+		return x.IsDefault
+	}
+	return false
+}
+
+func (x *EmbeddedSubtitleTrack) GetForced() bool {
+	if x != nil {
+		return x.Forced
+	}
+	return false
+}
+
+func (x *EmbeddedSubtitleTrack) GetHearingImpaired() bool {
+	if x != nil {
+		return x.HearingImpaired
+	}
+	return false
+}
+
 type SubtitleSearchResult struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Id              int32                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1971,7 +2063,7 @@ type SubtitleSearchResult struct {
 
 func (x *SubtitleSearchResult) Reset() {
 	*x = SubtitleSearchResult{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[30]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1983,7 +2075,7 @@ func (x *SubtitleSearchResult) String() string {
 func (*SubtitleSearchResult) ProtoMessage() {}
 
 func (x *SubtitleSearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[30]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1996,7 +2088,7 @@ func (x *SubtitleSearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubtitleSearchResult.ProtoReflect.Descriptor instead.
 func (*SubtitleSearchResult) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{30}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SubtitleSearchResult) GetId() int32 {
@@ -2050,7 +2142,7 @@ type ListSubtitlesRequest struct {
 
 func (x *ListSubtitlesRequest) Reset() {
 	*x = ListSubtitlesRequest{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[31]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2062,7 +2154,7 @@ func (x *ListSubtitlesRequest) String() string {
 func (*ListSubtitlesRequest) ProtoMessage() {}
 
 func (x *ListSubtitlesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[31]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2075,7 +2167,7 @@ func (x *ListSubtitlesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSubtitlesRequest.ProtoReflect.Descriptor instead.
 func (*ListSubtitlesRequest) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{31}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ListSubtitlesRequest) GetHash() string {
@@ -2086,17 +2178,18 @@ func (x *ListSubtitlesRequest) GetHash() string {
 }
 
 type ListSubtitlesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tracks        []*SubtitleTrack       `protobuf:"bytes,1,rep,name=tracks,proto3" json:"tracks,omitempty"`
-	Bundled       []*BundledSubtitleFile `protobuf:"bytes,2,rep,name=bundled,proto3" json:"bundled,omitempty"`
-	Configured    bool                   `protobuf:"varint,3,opt,name=configured,proto3" json:"configured,omitempty"`
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Tracks        []*SubtitleTrack         `protobuf:"bytes,1,rep,name=tracks,proto3" json:"tracks,omitempty"`
+	Bundled       []*BundledSubtitleFile   `protobuf:"bytes,2,rep,name=bundled,proto3" json:"bundled,omitempty"`
+	Configured    bool                     `protobuf:"varint,3,opt,name=configured,proto3" json:"configured,omitempty"`
+	Embedded      []*EmbeddedSubtitleTrack `protobuf:"bytes,4,rep,name=embedded,proto3" json:"embedded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListSubtitlesResponse) Reset() {
 	*x = ListSubtitlesResponse{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[32]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2108,7 +2201,7 @@ func (x *ListSubtitlesResponse) String() string {
 func (*ListSubtitlesResponse) ProtoMessage() {}
 
 func (x *ListSubtitlesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[32]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2121,7 +2214,7 @@ func (x *ListSubtitlesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSubtitlesResponse.ProtoReflect.Descriptor instead.
 func (*ListSubtitlesResponse) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{32}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ListSubtitlesResponse) GetTracks() []*SubtitleTrack {
@@ -2145,6 +2238,13 @@ func (x *ListSubtitlesResponse) GetConfigured() bool {
 	return false
 }
 
+func (x *ListSubtitlesResponse) GetEmbedded() []*EmbeddedSubtitleTrack {
+	if x != nil {
+		return x.Embedded
+	}
+	return nil
+}
+
 type GetSubtitleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Hash          string                 `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`
@@ -2155,7 +2255,7 @@ type GetSubtitleRequest struct {
 
 func (x *GetSubtitleRequest) Reset() {
 	*x = GetSubtitleRequest{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[33]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2167,7 +2267,7 @@ func (x *GetSubtitleRequest) String() string {
 func (*GetSubtitleRequest) ProtoMessage() {}
 
 func (x *GetSubtitleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[33]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2180,7 +2280,7 @@ func (x *GetSubtitleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSubtitleRequest.ProtoReflect.Descriptor instead.
 func (*GetSubtitleRequest) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{33}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *GetSubtitleRequest) GetHash() string {
@@ -2206,7 +2306,7 @@ type GetSubtitleResponse struct {
 
 func (x *GetSubtitleResponse) Reset() {
 	*x = GetSubtitleResponse{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[34]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2218,7 +2318,7 @@ func (x *GetSubtitleResponse) String() string {
 func (*GetSubtitleResponse) ProtoMessage() {}
 
 func (x *GetSubtitleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[34]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2231,7 +2331,7 @@ func (x *GetSubtitleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSubtitleResponse.ProtoReflect.Descriptor instead.
 func (*GetSubtitleResponse) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{34}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *GetSubtitleResponse) GetVtt() string {
@@ -2251,7 +2351,7 @@ type SearchSubtitlesRequest struct {
 
 func (x *SearchSubtitlesRequest) Reset() {
 	*x = SearchSubtitlesRequest{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[35]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2263,7 +2363,7 @@ func (x *SearchSubtitlesRequest) String() string {
 func (*SearchSubtitlesRequest) ProtoMessage() {}
 
 func (x *SearchSubtitlesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[35]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2276,7 +2376,7 @@ func (x *SearchSubtitlesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchSubtitlesRequest.ProtoReflect.Descriptor instead.
 func (*SearchSubtitlesRequest) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{35}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SearchSubtitlesRequest) GetHash() string {
@@ -2302,7 +2402,7 @@ type SearchSubtitlesResponse struct {
 
 func (x *SearchSubtitlesResponse) Reset() {
 	*x = SearchSubtitlesResponse{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[36]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2314,7 +2414,7 @@ func (x *SearchSubtitlesResponse) String() string {
 func (*SearchSubtitlesResponse) ProtoMessage() {}
 
 func (x *SearchSubtitlesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[36]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2327,7 +2427,7 @@ func (x *SearchSubtitlesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchSubtitlesResponse.ProtoReflect.Descriptor instead.
 func (*SearchSubtitlesResponse) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{36}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SearchSubtitlesResponse) GetResults() []*SubtitleSearchResult {
@@ -2353,7 +2453,7 @@ type AddSubtitleRequest struct {
 
 func (x *AddSubtitleRequest) Reset() {
 	*x = AddSubtitleRequest{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[37]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2365,7 +2465,7 @@ func (x *AddSubtitleRequest) String() string {
 func (*AddSubtitleRequest) ProtoMessage() {}
 
 func (x *AddSubtitleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[37]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2378,7 +2478,7 @@ func (x *AddSubtitleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddSubtitleRequest.ProtoReflect.Descriptor instead.
 func (*AddSubtitleRequest) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{37}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *AddSubtitleRequest) GetHash() string {
@@ -2446,7 +2546,7 @@ type AddSubtitleResponse struct {
 
 func (x *AddSubtitleResponse) Reset() {
 	*x = AddSubtitleResponse{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[38]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2458,7 +2558,7 @@ func (x *AddSubtitleResponse) String() string {
 func (*AddSubtitleResponse) ProtoMessage() {}
 
 func (x *AddSubtitleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[38]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2471,7 +2571,7 @@ func (x *AddSubtitleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddSubtitleResponse.ProtoReflect.Descriptor instead.
 func (*AddSubtitleResponse) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{38}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AddSubtitleResponse) GetTrack() *SubtitleTrack {
@@ -2495,7 +2595,7 @@ type NetworkInterface struct {
 
 func (x *NetworkInterface) Reset() {
 	*x = NetworkInterface{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[39]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2507,7 +2607,7 @@ func (x *NetworkInterface) String() string {
 func (*NetworkInterface) ProtoMessage() {}
 
 func (x *NetworkInterface) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[39]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2520,7 +2620,7 @@ func (x *NetworkInterface) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkInterface.ProtoReflect.Descriptor instead.
 func (*NetworkInterface) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{39}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *NetworkInterface) GetName() string {
@@ -2575,7 +2675,7 @@ type InterfaceBindingInput struct {
 
 func (x *InterfaceBindingInput) Reset() {
 	*x = InterfaceBindingInput{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[40]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2587,7 +2687,7 @@ func (x *InterfaceBindingInput) String() string {
 func (*InterfaceBindingInput) ProtoMessage() {}
 
 func (x *InterfaceBindingInput) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[40]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2600,7 +2700,7 @@ func (x *InterfaceBindingInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterfaceBindingInput.ProtoReflect.Descriptor instead.
 func (*InterfaceBindingInput) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{40}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *InterfaceBindingInput) GetName() string {
@@ -2625,7 +2725,7 @@ type GetSettingsRequest struct {
 
 func (x *GetSettingsRequest) Reset() {
 	*x = GetSettingsRequest{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[41]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2637,7 +2737,7 @@ func (x *GetSettingsRequest) String() string {
 func (*GetSettingsRequest) ProtoMessage() {}
 
 func (x *GetSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[41]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2650,7 +2750,7 @@ func (x *GetSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSettingsRequest.ProtoReflect.Descriptor instead.
 func (*GetSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{41}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{42}
 }
 
 type GetSettingsResponse struct {
@@ -2668,7 +2768,7 @@ type GetSettingsResponse struct {
 
 func (x *GetSettingsResponse) Reset() {
 	*x = GetSettingsResponse{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[42]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2680,7 +2780,7 @@ func (x *GetSettingsResponse) String() string {
 func (*GetSettingsResponse) ProtoMessage() {}
 
 func (x *GetSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[42]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2693,7 +2793,7 @@ func (x *GetSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{42}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *GetSettingsResponse) GetHasTmdb() bool {
@@ -2757,7 +2857,7 @@ type SaveNetworkSettingsRequest struct {
 
 func (x *SaveNetworkSettingsRequest) Reset() {
 	*x = SaveNetworkSettingsRequest{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[43]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2769,7 +2869,7 @@ func (x *SaveNetworkSettingsRequest) String() string {
 func (*SaveNetworkSettingsRequest) ProtoMessage() {}
 
 func (x *SaveNetworkSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[43]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2782,7 +2882,7 @@ func (x *SaveNetworkSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveNetworkSettingsRequest.ProtoReflect.Descriptor instead.
 func (*SaveNetworkSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{43}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SaveNetworkSettingsRequest) GetInterfaceSettings() bool {
@@ -2822,7 +2922,7 @@ type SaveNetworkSettingsResponse struct {
 
 func (x *SaveNetworkSettingsResponse) Reset() {
 	*x = SaveNetworkSettingsResponse{}
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[44]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2834,7 +2934,7 @@ func (x *SaveNetworkSettingsResponse) String() string {
 func (*SaveNetworkSettingsResponse) ProtoMessage() {}
 
 func (x *SaveNetworkSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bigflix_v1_bigflix_proto_msgTypes[44]
+	mi := &file_bigflix_v1_bigflix_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2847,7 +2947,7 @@ func (x *SaveNetworkSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveNetworkSettingsResponse.ProtoReflect.Descriptor instead.
 func (*SaveNetworkSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{44}
+	return file_bigflix_v1_bigflix_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *SaveNetworkSettingsResponse) GetRestarting() bool {
@@ -3010,7 +3110,16 @@ const file_bigflix_v1_bigflix_proto_rawDesc = "" +
 	"\blanguage\x18\x03 \x01(\tR\blanguage\"?\n" +
 	"\x13BundledSubtitleFile\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xaf\x01\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xe4\x01\n" +
+	"\x15EmbeddedSubtitleTrack\x12!\n" +
+	"\fstream_index\x18\x01 \x01(\x05R\vstreamIndex\x12\x1a\n" +
+	"\blanguage\x18\x02 \x01(\tR\blanguage\x12\x14\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\x12\x14\n" +
+	"\x05codec\x18\x04 \x01(\tR\x05codec\x12\x1d\n" +
+	"\n" +
+	"is_default\x18\x05 \x01(\bR\tisDefault\x12\x16\n" +
+	"\x06forced\x18\x06 \x01(\bR\x06forced\x12)\n" +
+	"\x10hearing_impaired\x18\a \x01(\bR\x0fhearingImpaired\"\xaf\x01\n" +
 	"\x14SubtitleSearchResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x05R\x02id\x12\x1a\n" +
 	"\blanguage\x18\x02 \x01(\tR\blanguage\x12\x14\n" +
@@ -3019,13 +3128,14 @@ const file_bigflix_v1_bigflix_proto_rawDesc = "" +
 	"\x10hearing_impaired\x18\x05 \x01(\bR\x0fhearingImpaired\x12\x12\n" +
 	"\x04page\x18\x06 \x01(\tR\x04page\"*\n" +
 	"\x14ListSubtitlesRequest\x12\x12\n" +
-	"\x04hash\x18\x01 \x01(\tR\x04hash\"\xa5\x01\n" +
+	"\x04hash\x18\x01 \x01(\tR\x04hash\"\xe4\x01\n" +
 	"\x15ListSubtitlesResponse\x121\n" +
 	"\x06tracks\x18\x01 \x03(\v2\x19.bigflix.v1.SubtitleTrackR\x06tracks\x129\n" +
 	"\abundled\x18\x02 \x03(\v2\x1f.bigflix.v1.BundledSubtitleFileR\abundled\x12\x1e\n" +
 	"\n" +
 	"configured\x18\x03 \x01(\bR\n" +
-	"configured\"8\n" +
+	"configured\x12=\n" +
+	"\bembedded\x18\x04 \x03(\v2!.bigflix.v1.EmbeddedSubtitleTrackR\bembedded\"8\n" +
 	"\x12GetSubtitleRequest\x12\x12\n" +
 	"\x04hash\x18\x01 \x01(\tR\x04hash\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"'\n" +
@@ -3113,7 +3223,7 @@ func file_bigflix_v1_bigflix_proto_rawDescGZIP() []byte {
 	return file_bigflix_v1_bigflix_proto_rawDescData
 }
 
-var file_bigflix_v1_bigflix_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_bigflix_v1_bigflix_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_bigflix_v1_bigflix_proto_goTypes = []any{
 	(*GetStatusRequest)(nil),            // 0: bigflix.v1.GetStatusRequest
 	(*GetStatusResponse)(nil),           // 1: bigflix.v1.GetStatusResponse
@@ -3145,21 +3255,22 @@ var file_bigflix_v1_bigflix_proto_goTypes = []any{
 	(*ProbeMediaResponse)(nil),          // 27: bigflix.v1.ProbeMediaResponse
 	(*SubtitleTrack)(nil),               // 28: bigflix.v1.SubtitleTrack
 	(*BundledSubtitleFile)(nil),         // 29: bigflix.v1.BundledSubtitleFile
-	(*SubtitleSearchResult)(nil),        // 30: bigflix.v1.SubtitleSearchResult
-	(*ListSubtitlesRequest)(nil),        // 31: bigflix.v1.ListSubtitlesRequest
-	(*ListSubtitlesResponse)(nil),       // 32: bigflix.v1.ListSubtitlesResponse
-	(*GetSubtitleRequest)(nil),          // 33: bigflix.v1.GetSubtitleRequest
-	(*GetSubtitleResponse)(nil),         // 34: bigflix.v1.GetSubtitleResponse
-	(*SearchSubtitlesRequest)(nil),      // 35: bigflix.v1.SearchSubtitlesRequest
-	(*SearchSubtitlesResponse)(nil),     // 36: bigflix.v1.SearchSubtitlesResponse
-	(*AddSubtitleRequest)(nil),          // 37: bigflix.v1.AddSubtitleRequest
-	(*AddSubtitleResponse)(nil),         // 38: bigflix.v1.AddSubtitleResponse
-	(*NetworkInterface)(nil),            // 39: bigflix.v1.NetworkInterface
-	(*InterfaceBindingInput)(nil),       // 40: bigflix.v1.InterfaceBindingInput
-	(*GetSettingsRequest)(nil),          // 41: bigflix.v1.GetSettingsRequest
-	(*GetSettingsResponse)(nil),         // 42: bigflix.v1.GetSettingsResponse
-	(*SaveNetworkSettingsRequest)(nil),  // 43: bigflix.v1.SaveNetworkSettingsRequest
-	(*SaveNetworkSettingsResponse)(nil), // 44: bigflix.v1.SaveNetworkSettingsResponse
+	(*EmbeddedSubtitleTrack)(nil),       // 30: bigflix.v1.EmbeddedSubtitleTrack
+	(*SubtitleSearchResult)(nil),        // 31: bigflix.v1.SubtitleSearchResult
+	(*ListSubtitlesRequest)(nil),        // 32: bigflix.v1.ListSubtitlesRequest
+	(*ListSubtitlesResponse)(nil),       // 33: bigflix.v1.ListSubtitlesResponse
+	(*GetSubtitleRequest)(nil),          // 34: bigflix.v1.GetSubtitleRequest
+	(*GetSubtitleResponse)(nil),         // 35: bigflix.v1.GetSubtitleResponse
+	(*SearchSubtitlesRequest)(nil),      // 36: bigflix.v1.SearchSubtitlesRequest
+	(*SearchSubtitlesResponse)(nil),     // 37: bigflix.v1.SearchSubtitlesResponse
+	(*AddSubtitleRequest)(nil),          // 38: bigflix.v1.AddSubtitleRequest
+	(*AddSubtitleResponse)(nil),         // 39: bigflix.v1.AddSubtitleResponse
+	(*NetworkInterface)(nil),            // 40: bigflix.v1.NetworkInterface
+	(*InterfaceBindingInput)(nil),       // 41: bigflix.v1.InterfaceBindingInput
+	(*GetSettingsRequest)(nil),          // 42: bigflix.v1.GetSettingsRequest
+	(*GetSettingsResponse)(nil),         // 43: bigflix.v1.GetSettingsResponse
+	(*SaveNetworkSettingsRequest)(nil),  // 44: bigflix.v1.SaveNetworkSettingsRequest
+	(*SaveNetworkSettingsResponse)(nil), // 45: bigflix.v1.SaveNetworkSettingsResponse
 }
 var file_bigflix_v1_bigflix_proto_depIdxs = []int32{
 	4,  // 0: bigflix.v1.Movie.torrents:type_name -> bigflix.v1.Torrent
@@ -3174,51 +3285,52 @@ var file_bigflix_v1_bigflix_proto_depIdxs = []int32{
 	13, // 9: bigflix.v1.UpdateDownloadResponse.download:type_name -> bigflix.v1.DownloadStatus
 	28, // 10: bigflix.v1.ListSubtitlesResponse.tracks:type_name -> bigflix.v1.SubtitleTrack
 	29, // 11: bigflix.v1.ListSubtitlesResponse.bundled:type_name -> bigflix.v1.BundledSubtitleFile
-	30, // 12: bigflix.v1.SearchSubtitlesResponse.results:type_name -> bigflix.v1.SubtitleSearchResult
-	28, // 13: bigflix.v1.AddSubtitleResponse.track:type_name -> bigflix.v1.SubtitleTrack
-	39, // 14: bigflix.v1.GetSettingsResponse.interfaces:type_name -> bigflix.v1.NetworkInterface
-	40, // 15: bigflix.v1.SaveNetworkSettingsRequest.bindings:type_name -> bigflix.v1.InterfaceBindingInput
-	0,  // 16: bigflix.v1.BigflixService.GetStatus:input_type -> bigflix.v1.GetStatusRequest
-	2,  // 17: bigflix.v1.BigflixService.UpdateAuthToken:input_type -> bigflix.v1.UpdateAuthTokenRequest
-	6,  // 18: bigflix.v1.BigflixService.ListMovies:input_type -> bigflix.v1.ListMoviesRequest
-	8,  // 19: bigflix.v1.BigflixService.GetMovie:input_type -> bigflix.v1.GetMovieRequest
-	10, // 20: bigflix.v1.BigflixService.FindSources:input_type -> bigflix.v1.FindSourcesRequest
-	14, // 21: bigflix.v1.BigflixService.ListDownloads:input_type -> bigflix.v1.ListDownloadsRequest
-	16, // 22: bigflix.v1.BigflixService.GetDownload:input_type -> bigflix.v1.GetDownloadRequest
-	18, // 23: bigflix.v1.BigflixService.WatchDownload:input_type -> bigflix.v1.WatchDownloadRequest
-	20, // 24: bigflix.v1.BigflixService.StartDownload:input_type -> bigflix.v1.StartDownloadRequest
-	22, // 25: bigflix.v1.BigflixService.UpdateDownload:input_type -> bigflix.v1.UpdateDownloadRequest
-	24, // 26: bigflix.v1.BigflixService.DeleteDownload:input_type -> bigflix.v1.DeleteDownloadRequest
-	26, // 27: bigflix.v1.BigflixService.ProbeMedia:input_type -> bigflix.v1.ProbeMediaRequest
-	31, // 28: bigflix.v1.BigflixService.ListSubtitles:input_type -> bigflix.v1.ListSubtitlesRequest
-	33, // 29: bigflix.v1.BigflixService.GetSubtitle:input_type -> bigflix.v1.GetSubtitleRequest
-	35, // 30: bigflix.v1.BigflixService.SearchSubtitles:input_type -> bigflix.v1.SearchSubtitlesRequest
-	37, // 31: bigflix.v1.BigflixService.AddSubtitle:input_type -> bigflix.v1.AddSubtitleRequest
-	41, // 32: bigflix.v1.BigflixService.GetSettings:input_type -> bigflix.v1.GetSettingsRequest
-	43, // 33: bigflix.v1.BigflixService.SaveNetworkSettings:input_type -> bigflix.v1.SaveNetworkSettingsRequest
-	1,  // 34: bigflix.v1.BigflixService.GetStatus:output_type -> bigflix.v1.GetStatusResponse
-	3,  // 35: bigflix.v1.BigflixService.UpdateAuthToken:output_type -> bigflix.v1.UpdateAuthTokenResponse
-	7,  // 36: bigflix.v1.BigflixService.ListMovies:output_type -> bigflix.v1.ListMoviesResponse
-	9,  // 37: bigflix.v1.BigflixService.GetMovie:output_type -> bigflix.v1.GetMovieResponse
-	11, // 38: bigflix.v1.BigflixService.FindSources:output_type -> bigflix.v1.FindSourcesResponse
-	15, // 39: bigflix.v1.BigflixService.ListDownloads:output_type -> bigflix.v1.ListDownloadsResponse
-	17, // 40: bigflix.v1.BigflixService.GetDownload:output_type -> bigflix.v1.GetDownloadResponse
-	19, // 41: bigflix.v1.BigflixService.WatchDownload:output_type -> bigflix.v1.WatchDownloadResponse
-	21, // 42: bigflix.v1.BigflixService.StartDownload:output_type -> bigflix.v1.StartDownloadResponse
-	23, // 43: bigflix.v1.BigflixService.UpdateDownload:output_type -> bigflix.v1.UpdateDownloadResponse
-	25, // 44: bigflix.v1.BigflixService.DeleteDownload:output_type -> bigflix.v1.DeleteDownloadResponse
-	27, // 45: bigflix.v1.BigflixService.ProbeMedia:output_type -> bigflix.v1.ProbeMediaResponse
-	32, // 46: bigflix.v1.BigflixService.ListSubtitles:output_type -> bigflix.v1.ListSubtitlesResponse
-	34, // 47: bigflix.v1.BigflixService.GetSubtitle:output_type -> bigflix.v1.GetSubtitleResponse
-	36, // 48: bigflix.v1.BigflixService.SearchSubtitles:output_type -> bigflix.v1.SearchSubtitlesResponse
-	38, // 49: bigflix.v1.BigflixService.AddSubtitle:output_type -> bigflix.v1.AddSubtitleResponse
-	42, // 50: bigflix.v1.BigflixService.GetSettings:output_type -> bigflix.v1.GetSettingsResponse
-	44, // 51: bigflix.v1.BigflixService.SaveNetworkSettings:output_type -> bigflix.v1.SaveNetworkSettingsResponse
-	34, // [34:52] is the sub-list for method output_type
-	16, // [16:34] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	30, // 12: bigflix.v1.ListSubtitlesResponse.embedded:type_name -> bigflix.v1.EmbeddedSubtitleTrack
+	31, // 13: bigflix.v1.SearchSubtitlesResponse.results:type_name -> bigflix.v1.SubtitleSearchResult
+	28, // 14: bigflix.v1.AddSubtitleResponse.track:type_name -> bigflix.v1.SubtitleTrack
+	40, // 15: bigflix.v1.GetSettingsResponse.interfaces:type_name -> bigflix.v1.NetworkInterface
+	41, // 16: bigflix.v1.SaveNetworkSettingsRequest.bindings:type_name -> bigflix.v1.InterfaceBindingInput
+	0,  // 17: bigflix.v1.BigflixService.GetStatus:input_type -> bigflix.v1.GetStatusRequest
+	2,  // 18: bigflix.v1.BigflixService.UpdateAuthToken:input_type -> bigflix.v1.UpdateAuthTokenRequest
+	6,  // 19: bigflix.v1.BigflixService.ListMovies:input_type -> bigflix.v1.ListMoviesRequest
+	8,  // 20: bigflix.v1.BigflixService.GetMovie:input_type -> bigflix.v1.GetMovieRequest
+	10, // 21: bigflix.v1.BigflixService.FindSources:input_type -> bigflix.v1.FindSourcesRequest
+	14, // 22: bigflix.v1.BigflixService.ListDownloads:input_type -> bigflix.v1.ListDownloadsRequest
+	16, // 23: bigflix.v1.BigflixService.GetDownload:input_type -> bigflix.v1.GetDownloadRequest
+	18, // 24: bigflix.v1.BigflixService.WatchDownload:input_type -> bigflix.v1.WatchDownloadRequest
+	20, // 25: bigflix.v1.BigflixService.StartDownload:input_type -> bigflix.v1.StartDownloadRequest
+	22, // 26: bigflix.v1.BigflixService.UpdateDownload:input_type -> bigflix.v1.UpdateDownloadRequest
+	24, // 27: bigflix.v1.BigflixService.DeleteDownload:input_type -> bigflix.v1.DeleteDownloadRequest
+	26, // 28: bigflix.v1.BigflixService.ProbeMedia:input_type -> bigflix.v1.ProbeMediaRequest
+	32, // 29: bigflix.v1.BigflixService.ListSubtitles:input_type -> bigflix.v1.ListSubtitlesRequest
+	34, // 30: bigflix.v1.BigflixService.GetSubtitle:input_type -> bigflix.v1.GetSubtitleRequest
+	36, // 31: bigflix.v1.BigflixService.SearchSubtitles:input_type -> bigflix.v1.SearchSubtitlesRequest
+	38, // 32: bigflix.v1.BigflixService.AddSubtitle:input_type -> bigflix.v1.AddSubtitleRequest
+	42, // 33: bigflix.v1.BigflixService.GetSettings:input_type -> bigflix.v1.GetSettingsRequest
+	44, // 34: bigflix.v1.BigflixService.SaveNetworkSettings:input_type -> bigflix.v1.SaveNetworkSettingsRequest
+	1,  // 35: bigflix.v1.BigflixService.GetStatus:output_type -> bigflix.v1.GetStatusResponse
+	3,  // 36: bigflix.v1.BigflixService.UpdateAuthToken:output_type -> bigflix.v1.UpdateAuthTokenResponse
+	7,  // 37: bigflix.v1.BigflixService.ListMovies:output_type -> bigflix.v1.ListMoviesResponse
+	9,  // 38: bigflix.v1.BigflixService.GetMovie:output_type -> bigflix.v1.GetMovieResponse
+	11, // 39: bigflix.v1.BigflixService.FindSources:output_type -> bigflix.v1.FindSourcesResponse
+	15, // 40: bigflix.v1.BigflixService.ListDownloads:output_type -> bigflix.v1.ListDownloadsResponse
+	17, // 41: bigflix.v1.BigflixService.GetDownload:output_type -> bigflix.v1.GetDownloadResponse
+	19, // 42: bigflix.v1.BigflixService.WatchDownload:output_type -> bigflix.v1.WatchDownloadResponse
+	21, // 43: bigflix.v1.BigflixService.StartDownload:output_type -> bigflix.v1.StartDownloadResponse
+	23, // 44: bigflix.v1.BigflixService.UpdateDownload:output_type -> bigflix.v1.UpdateDownloadResponse
+	25, // 45: bigflix.v1.BigflixService.DeleteDownload:output_type -> bigflix.v1.DeleteDownloadResponse
+	27, // 46: bigflix.v1.BigflixService.ProbeMedia:output_type -> bigflix.v1.ProbeMediaResponse
+	33, // 47: bigflix.v1.BigflixService.ListSubtitles:output_type -> bigflix.v1.ListSubtitlesResponse
+	35, // 48: bigflix.v1.BigflixService.GetSubtitle:output_type -> bigflix.v1.GetSubtitleResponse
+	37, // 49: bigflix.v1.BigflixService.SearchSubtitles:output_type -> bigflix.v1.SearchSubtitlesResponse
+	39, // 50: bigflix.v1.BigflixService.AddSubtitle:output_type -> bigflix.v1.AddSubtitleResponse
+	43, // 51: bigflix.v1.BigflixService.GetSettings:output_type -> bigflix.v1.GetSettingsResponse
+	45, // 52: bigflix.v1.BigflixService.SaveNetworkSettings:output_type -> bigflix.v1.SaveNetworkSettingsResponse
+	35, // [35:53] is the sub-list for method output_type
+	17, // [17:35] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_bigflix_v1_bigflix_proto_init() }
@@ -3232,7 +3344,7 @@ func file_bigflix_v1_bigflix_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bigflix_v1_bigflix_proto_rawDesc), len(file_bigflix_v1_bigflix_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   45,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

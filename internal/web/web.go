@@ -72,7 +72,10 @@ func NewWithRestart(service *catalog.Service, engine *downloads.Manager, restart
 		connect.WithInterceptors(a.authInterceptor()),
 	)
 	mux.Handle(rpcPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/WatchDownload") || strings.HasSuffix(r.URL.Path, "/ProbeMedia") {
+		if strings.HasSuffix(r.URL.Path, "/WatchDownload") ||
+			strings.HasSuffix(r.URL.Path, "/ProbeMedia") ||
+			strings.HasSuffix(r.URL.Path, "/AddSubtitle") ||
+			strings.HasSuffix(r.URL.Path, "/ListSubtitles") {
 			controller := http.NewResponseController(w)
 			_ = controller.SetWriteDeadline(time.Time{})
 		}
