@@ -1,0 +1,178 @@
+/* ==========================================================================
+   KINO DESIGN SYSTEM — Tokens & Base
+   Warm Obsidian Cinema · Projector Gold Accent · Mobile-First Geometry
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Surface elevation ladder */
+  --surface-0: #0c0b0a;
+  --surface-1: #141311;
+  --surface-2: #1c1a17;
+  --surface-3: #26231f;
+  --surface-glass: rgba(12, 11, 10, 0.78);
+  --surface-glass-heavy: rgba(16, 15, 13, 0.92);
+
+  /* Typography ink ladder */
+  --ink-1: #f5f2eb;
+  --ink-2: #a8a296;
+  --ink-3: #706a60;
+
+  /* Hairlines */
+  --line-subtle: rgba(245, 242, 235, 0.06);
+  --line-default: rgba(245, 242, 235, 0.11);
+  --line-strong: rgba(245, 242, 235, 0.2);
+
+  /* Brand & semantic accents */
+  --accent: #e8b954;
+  --accent-hover: #f2c86b;
+  --accent-soft: rgba(232, 185, 84, 0.14);
+  --accent-ring: rgba(232, 185, 84, 0.35);
+  --accent-ink: #14110a;
+
+  --status-ok: #46c085;
+  --status-ok-soft: rgba(70, 192, 133, 0.14);
+  --status-warn: #e5a03c;
+  --status-warn-soft: rgba(229, 160, 60, 0.14);
+  --status-danger: #e55b5b;
+  --status-danger-soft: rgba(229, 91, 91, 0.13);
+  --status-danger-line: rgba(229, 91, 91, 0.28);
+
+  /* Typography */
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-xs: 11.5px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15.5px;
+  --text-lg: 18px;
+  --text-xl: clamp(22px, 3vw, 28px);
+  --text-2xl: clamp(26px, 4vw, 38px);
+
+  /* Spacing rhythm (4px scale) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* Radii */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.32);
+  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.62);
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 140ms;
+  --t-base: 220ms;
+
+  /* Layout */
+  --max-width: 1240px;
+  --topbar-h: 60px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--surface-0);
+}
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface-0);
+  border: 1px solid var(--line-default);
+  border-radius: var(--r-xs);
+  padding: 2px 7px;
+  color: var(--ink-1);
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

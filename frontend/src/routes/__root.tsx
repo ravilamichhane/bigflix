@@ -6,6 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import {
+  BrandMarkIcon,
   CompassIcon,
   DownloadIcon,
   FlameIcon,
@@ -35,14 +36,16 @@ function RootLayout() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <Link className="brand" to="/" aria-label="Bigflix home">
-            <span className="brand-mark">b</span>
-            <span>bigflix</span>
+      <header className="kino-topbar">
+        <div className="kino-topbar-inner">
+          <Link className="kino-brand" to="/" aria-label="Bigflix home">
+            <span className="kino-brand-mark">
+              <BrandMarkIcon size={15} />
+            </span>
+            <span>Bigflix</span>
           </Link>
 
-          <nav className="desktop-nav" aria-label="Main navigation">
+          <nav className="kino-nav" aria-label="Main navigation">
             <Link to="/" aria-current={isDiscover ? "page" : undefined}>
               Discover
             </Link>
@@ -65,9 +68,9 @@ function RootLayout() {
             </Link>
           </nav>
 
-          <div className="header-actions">
+          <div className="kino-actions">
             <Link
-              className="icon-btn"
+              className="ds-btn ds-btn-ghost ds-btn-icon"
               to="/settings"
               aria-label="Settings"
               aria-current={isSettings ? "page" : undefined}
@@ -77,7 +80,7 @@ function RootLayout() {
             </Link>
             <button
               type="button"
-              className="icon-btn"
+              className="ds-btn ds-btn-ghost ds-btn-icon"
               onClick={lock}
               aria-label="Lock session"
               title="Lock session"
@@ -88,11 +91,11 @@ function RootLayout() {
         </div>
       </header>
 
-      <main>
+      <main className="kino-main">
         <Outlet />
       </main>
 
-      <nav className="mobile-tabbar" aria-label="Mobile navigation">
+      <nav className="kino-dock" aria-label="Mobile navigation">
         <Link to="/" aria-current={isDiscover ? "page" : undefined}>
           <CompassIcon size={20} />
           <span>Discover</span>

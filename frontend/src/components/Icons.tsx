@@ -260,3 +260,11 @@ export function LinkIcon(props: IconProps) {
     </Svg>
   );
 }
+
+export function BrandMarkIcon(props: IconProps) {
+  return (
+    <Svg {...props} fill="currentColor" stroke="none">
+      <path d="M7.5 5.5a1.5 1.5 0 0 1 2.28-1.28l9.2 5.6a1.5 1.5 0 0 1 0 2.56l-9.2 5.6A1.5 1.5 0 0 1 7.5 16.7V5.5Z" />
+    </Svg>
+  );
+}

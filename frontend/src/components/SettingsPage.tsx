@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { client, errMessage, setToken } from "../api";
 import type { GetSettingsResponse } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
+import { Badge, Button, EmptyState } from "./ui";
 
 interface SettingsPageProps {
   navigate: NavigateFn;
@@ -110,84 +111,79 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
 
   if (restarting) {
     return (
-      <section className="settings-page">
-        <div className="empty">
-          <h2>Applying network settings…</h2>
-          <p>The client is restarting and will refresh shortly.</p>
-          <button
-            type="button"
-            className="button"
+      <EmptyState
+        title="Applying network settings…"
+        description="The client is restarting and will refresh shortly."
+        actions={
+          <Button
             onClick={() => {
               setRestarting(false);
               void loadSettings();
             }}
           >
             Reload
-          </button>
-        </div>
-      </section>
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <section className="settings-page">
-      <div className="page-head">
+    <section className="settings-wrap">
+      <div className="page-title-row" style={{ marginBottom: 0 }}>
         <h1>Settings</h1>
       </div>
 
       {error && (
-        <p className="notice" role="alert">
+        <div className="ds-alert ds-alert-warn" role="alert">
           {error}
-        </p>
+        </div>
       )}
 
       <div className="settings-grid">
-        <article className="panel-card settings-card">
-          <div className="card-head">
+        <article className="ds-card settings-card">
+          <div className="settings-card-head">
             <h2>Access lock</h2>
-            <span className="pill">Protected</span>
+            <Badge tone="ok">Protected</Badge>
           </div>
-          <p className="muted">
-            Change your access token or lock this browser session immediately.
-          </p>
+          <p className="muted">Update your access token or lock this browser session.</p>
           <form onSubmit={handleSaveToken}>
             <div className="token-row">
               <input
                 type="password"
+                className="ds-input"
                 aria-label="New access token"
                 placeholder="New token (min 4 chars)"
                 value={newToken}
                 onChange={(e) => setNewToken(e.target.value)}
               />
-              <button className="button" type="submit" disabled={savingToken}>
+              <Button type="submit" disabled={savingToken}>
                 {savingToken ? "Saving…" : "Update"}
-              </button>
+              </Button>
             </div>
             {tokenErr && (
-              <p className="error-banner" role="alert">
+              <div className="ds-alert ds-alert-danger" role="alert">
                 {tokenErr}
-              </p>
+              </div>
             )}
-            {tokenMsg && <p className="notice">{tokenMsg}</p>}
+            {tokenMsg && <div className="ds-alert ds-alert-ok">{tokenMsg}</div>}
           </form>
-          <div className="card-foot">
-            <button type="button" className="button secondary" onClick={onLock}>
+          <div className="settings-foot">
+            <Button variant="secondary" size="sm" onClick={onLock}>
               Lock session
-            </button>
+            </Button>
           </div>
         </article>
 
-        <article className="panel-card settings-card">
-          <div className="card-head">
+        <article className="ds-card settings-card">
+          <div className="settings-card-head">
             <h2>Catalog</h2>
-            <span className="pill">Active</span>
+            <Badge tone="ok">Active</Badge>
           </div>
-          <p className="muted">
-            YTS search and details cached locally in SQLite.
-          </p>
-          <div className="card-foot">
+          <p className="muted">YTS search and metadata cached locally in SQLite.</p>
+          <div className="settings-foot">
             <a
-              className="text-link"
+              className="ds-link"
               href="/"
               onClick={(e) => {
                 e.preventDefault();
@@ -199,20 +195,19 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
           </div>
         </article>
 
-        <article className="panel-card settings-card">
-          <div className="card-head">
+        <article className="ds-card settings-card">
+          <div className="settings-card-head">
             <h2>TMDB Discovery</h2>
-            <span className={`pill ${!data?.hasTmdb ? "pending" : ""}`}>
+            <Badge tone={data?.hasTmdb ? "ok" : "warn"}>
               {data?.hasTmdb ? "Configured" : "Optional"}
-            </span>
+            </Badge>
           </div>
           <p className="muted">
-            Trending and new releases use TMDB. Set <code>TMDB_READ_TOKEN</code> in the server
-            environment to enable.
+            Trending and New use TMDB. Set <code>TMDB_READ_TOKEN</code> in the server environment.
           </p>
-          <div className="card-foot">
+          <div className="settings-foot">
             <a
-              className="text-link"
+              className="ds-link"
               href="https://www.themoviedb.org/settings/api"
               target="_blank"
               rel="noreferrer"
@@ -227,21 +222,21 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
         <p className="muted">Loading network interfaces…</p>
       ) : (
         data?.hasEngine && (
-          <form className="network-section" onSubmit={handleSaveNetwork}>
-            <div className="section-head">
+          <form onSubmit={handleSaveNetwork} style={{ display: "grid", gap: 16 }}>
+            <div className="section-bar">
               <h2>Network interfaces</h2>
             </div>
 
             {data.allInterfaces && (
-              <p className="notice">
+              <div className="ds-alert ds-alert-warn" style={{ margin: 0 }}>
                 Using all interfaces on port {data.actualPort}. Save below to bind specific
                 interfaces.
-              </p>
+              </div>
             )}
             {data.errors.map((errText, idx) => (
-              <p key={idx} className="notice" role="alert">
+              <div key={idx} className="ds-alert ds-alert-warn" role="alert" style={{ margin: 0 }}>
                 {errText}
-              </p>
+              </div>
             ))}
 
             <div className="settings-grid">
@@ -252,8 +247,8 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                   port: iface.port || 51413,
                 };
                 return (
-                  <article key={iface.name} className="panel-card settings-card">
-                    <div className="card-head">
+                  <article key={iface.name} className="ds-card settings-card">
+                    <div className="settings-card-head">
                       <label className="iface-check">
                         <input
                           type="checkbox"
@@ -265,11 +260,9 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                             }))
                           }
                         />
-                        <strong>{iface.name}</strong>
+                        <span>{iface.name}</span>
                       </label>
-                      <span className={`pill ${iface.up ? "" : "pending"}`}>
-                        {iface.up ? "Up" : "Down"}
-                      </span>
+                      <Badge tone={iface.up ? "ok" : "warn"}>{iface.up ? "Up" : "Down"}</Badge>
                     </div>
 
                     {iface.addresses.length ? (
@@ -286,6 +279,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                       <label>
                         Port mode
                         <select
+                          className="ds-select"
                           id={`mode-${iface.name}`}
                           value={state.mode}
                           onChange={(e) =>
@@ -306,6 +300,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                         <label>
                           Port
                           <input
+                            className="ds-input mono"
                             id={`port-${iface.name}`}
                             type="number"
                             min={1024}
@@ -326,7 +321,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                     </div>
 
                     {iface.listeners.length > 0 && (
-                      <p className="muted iface-listen">
+                      <p className="muted mono" style={{ fontSize: 11.5 }}>
                         Listening: {iface.listeners.join(", ")}
                       </p>
                     )}
@@ -335,10 +330,10 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
               })}
             </div>
 
-            <div className="network-save">
-              <button className="button" type="submit" disabled={savingNet}>
+            <div>
+              <Button type="submit" disabled={savingNet}>
                 {savingNet ? "Saving…" : "Save & restart client"}
-              </button>
+              </Button>
             </div>
           </form>
         )

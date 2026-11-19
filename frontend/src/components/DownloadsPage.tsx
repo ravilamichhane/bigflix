@@ -3,9 +3,17 @@ import { client, errMessage, formatBytes } from "../api";
 import type { DownloadStatus } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
 import { PlayIcon, TrashIcon } from "./Icons";
+import { Badge, Button, EmptyState, ProgressBar } from "./ui";
 
 interface DownloadsPageProps {
   navigate: NavigateFn;
+}
+
+function stateTone(state: string): "ok" | "accent" | "warn" | "neutral" {
+  if (state === "complete") return "ok";
+  if (state === "downloading") return "accent";
+  if (state === "paused" || state === "metadata") return "warn";
+  return "neutral";
 }
 
 export function DownloadsPage({ navigate }: DownloadsPageProps) {
@@ -56,28 +64,26 @@ export function DownloadsPage({ navigate }: DownloadsPageProps) {
   }
 
   return (
-    <div className="downloads-page">
-      <div className="page-head">
+    <div>
+      <div className="page-title-row">
         <h1>Downloads</h1>
-        {downloads.length > 0 && <span className="count">{downloads.length}</span>}
+        {downloads.length > 0 && <Badge className="mono">{downloads.length}</Badge>}
       </div>
 
       {error && (
-        <div className="error-banner" role="alert">
+        <div className="ds-alert ds-alert-danger" role="alert">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="empty">
-          <p>Loading…</p>
-        </div>
+        <EmptyState title="Loading downloads…" />
       ) : downloads.length ? (
         <div className="download-list">
           {downloads.map((d) => (
-            <div key={d.hash} className="download-row">
+            <div key={d.hash} className="download-item">
               <a
-                className="download-row-main"
+                className="download-item-link"
                 href={`/watch/${d.hash}`}
                 onClick={(e) => {
                   e.preventDefault();
@@ -91,52 +97,48 @@ export function DownloadsPage({ navigate }: DownloadsPageProps) {
                     <PlayIcon size={18} />
                   )}
                 </div>
-                <div className="download-row-info">
-                  <h2>{d.title}</h2>
-                  <p className="dl-row-meta">
-                    <span className="dl-state-inline">{d.state}</span>
-                    {" · "}
+
+                <div className="download-item-body">
+                  <div className="download-item-title">
+                    <h2>{d.title}</h2>
+                    <Badge tone={stateTone(d.state)}>{d.state}</Badge>
+                    {d.keep && <Badge>Kept</Badge>}
+                  </div>
+
+                  <div className="download-item-meta">
                     {(d.progress * 100).toFixed(0)}% · {formatBytes(d.completed)} /{" "}
                     {formatBytes(d.size)}
                     {d.speed > 0n ? ` · ${formatBytes(d.speed)}/s` : ""}
-                    {d.keep ? " · Kept" : ""}
-                  </p>
-                  <progress
-                    max={1}
-                    value={d.progress}
-                    aria-label={`${d.title} download progress`}
-                  />
-                  {d.error && <p className="dl-warn">{d.error}</p>}
+                  </div>
+
+                  <ProgressBar value={d.progress} label={`${d.title} progress`} />
+                  {d.error && (
+                    <span className="muted" style={{ color: "var(--status-warn)" }}>
+                      {d.error}
+                    </span>
+                  )}
                 </div>
               </a>
-              <button
-                type="button"
-                className="icon-btn danger-icon"
+
+              <Button
+                variant="ghost"
+                size="icon"
                 aria-label={`Delete ${d.title}`}
                 title="Delete download"
                 disabled={deletingHash === d.hash}
                 onClick={() => void handleDelete(d)}
               >
                 <TrashIcon size={17} />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
       ) : (
-        <div className="empty">
-          <h2>No downloads yet</h2>
-          <p>Pick a movie from Discover to start streaming or downloading.</p>
-          <a
-            className="button"
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/");
-            }}
-          >
-            Browse movies
-          </a>
-        </div>
+        <EmptyState
+          title="No downloads yet"
+          description="Pick any movie from Discover to start streaming or saving locally."
+          actions={<Button onClick={() => navigate("/")}>Browse movies</Button>}
+        />
       )}
     </div>
   );

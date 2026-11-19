@@ -1,13 +1,16 @@
 import { Link } from "@tanstack/react-router";
+import { EmptyState } from "./ui";
 
 export function NotFoundView() {
   return (
-    <div className="empty">
-      <h2>Page not found</h2>
-      <p>That page does not exist.</p>
-      <Link className="button" to="/">
-        Browse movies
-      </Link>
-    </div>
+    <EmptyState
+      title="Page not found"
+      description="The page you requested doesn’t exist."
+      actions={
+        <Link className="ds-btn ds-btn-primary" to="/">
+          Browse movies
+        </Link>
+      }
+    />
   );
 }

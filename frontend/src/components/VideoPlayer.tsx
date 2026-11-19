@@ -26,6 +26,7 @@ import {
   VolumeMuteIcon,
 } from "./Icons";
 import { SubtitleDialog } from "./SubtitleDialog";
+import { Button } from "./ui";
 
 interface VideoPlayerProps {
   hash: string;
@@ -82,10 +83,13 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   const [subOpenSignal, setSubOpenSignal] = useState(0);
   const [subActive, setSubActive] = useState(false);
   const [copiedVlc, setCopiedVlc] = useState(false);
-  const [seekFeedback, setSeekFeedback] = useState<string | null>(null);
+  const [seekFeedback, setSeekFeedback] = useState<{
+    label: string;
+    side: "left" | "right" | "center";
+  } | null>(null);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
 
-  // Mutable engine refs (zero stale closures)
+  // Mutable engine refs
   const latestRef = useRef<DownloadStatus | null>(null);
   const readyRef = useRef(false);
   const startedRef = useRef(false);
@@ -103,7 +107,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     side: "center",
   });
 
-  // MSE / Streaming session refs
   const engineRef = useRef({
     remux: null as "copy" | "compat" | null,
     info: null as ProbeMediaResponse | null,
@@ -135,12 +138,12 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         if (wantPlayRef.current && !scrubbingRef.current) {
           setControlsVisible(false);
         }
-      }, 3000);
+      }, 4000);
     }
   }, []);
 
-  const flashSeek = useCallback((label: string) => {
-    setSeekFeedback(label);
+  const flashSeek = useCallback((label: string, side: "left" | "right" | "center") => {
+    setSeekFeedback({ label, side });
     if (feedbackTimerRef.current !== undefined) {
       window.clearTimeout(feedbackTimerRef.current);
     }
@@ -149,7 +152,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     }, 650);
   }, []);
 
-  // Pre-probe & update readiness from download status updates.
   useEffect(() => {
     if (!latest) return;
     if (!startedRef.current) {
@@ -165,21 +167,21 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         latest.size > 0n && !latest.playable
           ? "FFmpeg is required to play this container in the browser."
           : !latest.direct
-            ? "Converted on the fly for browser playback."
+            ? "Remuxing on the fly for browser playback."
             : "Direct browser playback.",
       );
       if (latest.state === "metadata") {
-        setStatusText("Finding peers & torrent metadata…");
+        setStatusText("Finding peers & metadata…");
       } else if (latest.state === "paused") {
         setStatusText("Download paused");
       } else if (latest.state === "select-file") {
-        setStatusText("Select a video file below");
+        setStatusText("Select a video below");
       } else if (latest.error) {
         setStatusText(latest.error);
       } else if (isReady) {
-        setStatusText("Ready to play");
+        setStatusText("Ready");
       } else {
-        setStatusText("Waiting for playable video…");
+        setStatusText("Waiting for video…");
       }
     }
 
@@ -205,7 +207,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         setStatusText("Tap play to start");
         showControls(true);
       }
-      // AbortError is normal when src/seek interrupts a pending play(); ignore.
     }
   }, [showControls]);
 
@@ -229,7 +230,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
   const startPlaybackRef = useRef<(fromOverride?: number) => Promise<void>>(async () => {});
 
-  // Wire up MSE streaming + native video listeners once per hash.
   useEffect(() => {
     const rawVideo = videoRef.current;
     if (!rawVideo) return;
@@ -427,7 +427,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
           if (!(await appendBytes(merged, id))) return false;
           appended += merged.byteLength;
 
-          // Snap currentTime into the newly buffered range so MSE never stalls at a 0.04s gap!
           if (!aligned && eng.buffer && eng.buffer.buffered.length > 0) {
             const bStart = eng.buffer.buffered.start(0);
             const bEnd = eng.buffer.buffered.end(0);
@@ -449,7 +448,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         };
 
         for (;;) {
-          // Backpressure: pause reading when we have 45s buffered ahead.
           while (id === eng.session && !eng.disposed) {
             const range = rangeAt(video.currentTime);
             if (!range || range[1] - video.currentTime < 45) break;
@@ -480,7 +478,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
             pending.push(value);
             pendingBytes += value.byteLength;
 
-            // Low-latency immediate flush during startup/seek (<3s ahead); coalesce to 512KB once playing smoothly.
             const range = rangeAt(video.currentTime);
             const ahead = range ? range[1] - video.currentTime : 0;
             const threshold = ahead < 3 ? 0 : 512 * 1024;
@@ -531,7 +528,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
           useCompat();
           return;
         }
-        setStatusText("Reconnecting stream…");
+        setStatusText("Reconnecting…");
         setBuffering(true);
         await sleep(2000);
         if (id === eng.session && !eng.disposed) {
@@ -599,15 +596,14 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         eng.session++;
         eng.abort?.abort();
         revokeCurrentUrl();
-        setStatusText("Buffering video…");
-        const src = mediaUrl(`/media/${hash}`);
-        video.src = src;
+        setStatusText("Buffering…");
+        video.src = mediaUrl(`/media/${hash}`);
         video.load();
         await attemptPlay();
         return;
       }
 
-      setStatusText("Reading video info…");
+      setStatusText("Reading header…");
       try {
         eng.info = await probe();
       } catch (error) {
@@ -616,7 +612,9 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         wantPlayRef.current = false;
         setStarted(false);
         setBuffering(false);
-        setFatalError(errMessage(error).slice(0, 180) || "Not enough data yet — try again in a moment.");
+        setFatalError(
+          errMessage(error).slice(0, 180) || "Not enough data yet — try again in a moment.",
+        );
         return;
       }
       if (eng.disposed || !eng.info) return;
@@ -651,12 +649,10 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
     startPlaybackRef.current = startPlayback;
 
-    // Stall & MSE gap watchdog: glides over tiny muxer gaps and auto-resumes when ready.
     const watchdog = window.setInterval(() => {
       if (eng.disposed || !startedRef.current || !wantPlayRef.current || video.ended) return;
       if (scrubbingRef.current) return;
 
-      // Jump small MSE gaps (up to 1.5s) if stalled.
       if (eng.buffer && eng.buffer.buffered.length > 0 && video.readyState < 3) {
         const t = video.currentTime;
         const inRange = rangeAt(t);
@@ -672,13 +668,11 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         }
       }
 
-      // If browser paused silently while waiting for buffer and now has data, resume automatically.
       if (video.paused && video.readyState >= 3 && !video.error) {
         void attemptPlay();
       }
     }, 400);
 
-    // Native video events
     const onLoadedMeta = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) {
         setDuration(video.duration);
@@ -762,9 +756,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
     const onSeeked = () => {
       updateBufferedUI();
-      if (video.readyState >= 3) {
-        setBuffering(false);
-      }
+      if (video.readyState >= 3) setBuffering(false);
       if (wantPlayRef.current && video.paused && !video.ended) {
         void attemptPlay();
       }
@@ -772,9 +764,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
     let lastSave = 0;
     const onTimeUpdate = () => {
-      if (!scrubbingRef.current) {
-        setCurrentTime(video.currentTime);
-      }
+      if (!scrubbingRef.current) setCurrentTime(video.currentTime);
       updateBufferedUI();
       if (Date.now() - lastSave > 10000) {
         lastSave = Date.now();
@@ -791,18 +781,15 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
     const onError = () => {
       if (eng.disposed) return;
-      // Fallback from copy -> compat for unsupported MSE codecs
       if (eng.remux === "copy" && MS && [3, 4].includes(video.error?.code || 0)) {
         useCompat();
         return;
       }
-      // Auto-retry transient errors in direct playback (e.g. 503 waiting for torrent pieces)
       if (!eng.remux && startedRef.current && eng.directRetries < 5) {
         eng.directRetries++;
-        const resumeAt = video.currentTime || savedPositionRef.current;
-        savedPositionRef.current = resumeAt;
+        savedPositionRef.current = video.currentTime || savedPositionRef.current;
         setBuffering(true);
-        setStatusText(`Waiting for video pieces… retry ${eng.directRetries}/5`);
+        setStatusText(`Waiting for pieces · retry ${eng.directRetries}/5`);
         if (eng.retryTimer !== undefined) window.clearTimeout(eng.retryTimer);
         eng.retryTimer = window.setTimeout(() => {
           if (eng.disposed || !wantPlayRef.current) return;
@@ -828,9 +815,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     };
 
     const onFsChange = () => {
-      setIsFullscreen(
-        Boolean(document.fullscreenElement || video.webkitDisplayingFullscreen),
-      );
+      setIsFullscreen(Boolean(document.fullscreenElement || video.webkitDisplayingFullscreen));
     };
 
     video.addEventListener("loadedmetadata", onLoadedMeta);
@@ -905,7 +890,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   }, [attemptPlay, fatalError, showControls]);
 
   const seekBy = useCallback(
-    (delta: number) => {
+    (delta: number, side: "left" | "right" | "center" = "center") => {
       const video = videoRef.current;
       if (!video || !startedRef.current) return;
       const dur = duration || video.duration;
@@ -913,7 +898,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       const next = Math.max(0, Math.min(dur, video.currentTime + delta));
       video.currentTime = next;
       setCurrentTime(next);
-      flashSeek(delta > 0 ? `+${delta}s` : `${delta}s`);
+      flashSeek(delta > 0 ? `+${delta}s` : `${delta}s`, side);
       showControls(false);
     },
     [duration, flashSeek, showControls],
@@ -923,7 +908,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const video = videoRef.current;
     if (!video) return;
     video.muted = !video.muted;
-  }, []);
+    showControls(false);
+  }, [showControls]);
 
   const toggleFullscreen = useCallback(() => {
     const container = containerRef.current;
@@ -939,7 +925,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     } else if (video.webkitEnterFullscreen) {
       video.webkitEnterFullscreen();
     }
-  }, []);
+    showControls(false);
+  }, [showControls]);
 
   const cycleRate = useCallback(() => {
     const video = videoRef.current;
@@ -948,7 +935,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const next = RATES[(idx + 1) % RATES.length];
     video.playbackRate = next;
     setRate(next);
-  }, [rate]);
+    showControls(false);
+  }, [rate, showControls]);
 
   const handleRetry = useCallback(() => {
     const video = videoRef.current;
@@ -965,7 +953,8 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         window.setTimeout(() => setCopiedVlc(false), 2000);
       })
       .catch(() => {});
-  }, [hash]);
+    showControls(false);
+  }, [hash, showControls]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1007,13 +996,13 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       if (key === " " || key === "k") {
         togglePlay();
       } else if (key === "arrowleft") {
-        seekBy(-5);
+        seekBy(-5, "left");
       } else if (key === "arrowright") {
-        seekBy(5);
+        seekBy(5, "right");
       } else if (key === "j") {
-        seekBy(-10);
+        seekBy(-10, "left");
       } else if (key === "l") {
-        seekBy(10);
+        seekBy(10, "right");
       } else if (key === "arrowup" && video) {
         video.volume = Math.min(1, video.volume + 0.05);
         video.muted = false;
@@ -1032,7 +1021,6 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [seekBy, toggleFullscreen, toggleMute, togglePlay]);
 
-  // Scrubbing pointer handlers (mouse + touch)
   const calcScrubTime = (clientX: number): number => {
     const el = scrubRef.current;
     if (!el || !duration) return 0;
@@ -1047,8 +1035,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     scrubbingRef.current = true;
-    const t = calcScrubTime(e.clientX);
-    setScrubTime(t);
+    setScrubTime(calcScrubTime(e.clientX));
     showControls(true);
   };
 
@@ -1070,8 +1057,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     showControls(false);
   };
 
-  // Video surface tap/click handling (mobile double-tap to seek, desktop click to play/pause)
-  const onSurfaceClick = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onSurfaceUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!ready) return;
     if (!started) {
       togglePlay();
@@ -1081,21 +1067,21 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const rect = e.currentTarget.getBoundingClientRect();
     const xRatio = (e.clientX - rect.left) / rect.width;
     const side: "left" | "right" | "center" =
-      xRatio < 0.3 ? "left" : xRatio > 0.7 ? "right" : "center";
+      xRatio < 0.32 ? "left" : xRatio > 0.68 ? "right" : "center";
 
-    if (e.pointerType === "touch") {
+    if (e.pointerType !== "mouse") {
       const now = Date.now();
       if (
         side !== "center" &&
         lastTapRef.current.side === side &&
         now - lastTapRef.current.time < 320
       ) {
-        seekBy(side === "left" ? -10 : 10);
+        seekBy(side === "left" ? -10 : 10, side);
         lastTapRef.current = { time: 0, side: "center" };
         return;
       }
       lastTapRef.current = { time: now, side };
-      if (controlsVisible) {
+      if (controlsVisible && playing) {
         setControlsVisible(false);
       } else {
         showControls(false);
@@ -1105,6 +1091,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     }
   };
 
+  const uiOpen = controlsVisible || !playing || !started || buffering || Boolean(fatalError);
   const displayTime = scrubTime ?? currentTime;
   const playedPct = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
   const bufferedPct = duration > 0 ? Math.min(100, (bufferedEndTime / duration) * 100) : 0;
@@ -1112,96 +1099,138 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   return (
     <div
       ref={containerRef}
-      className={`vp ${controlsVisible || !playing ? "vp-ui-visible" : ""} ${
-        isFullscreen ? "vp-fs" : ""
-      }`}
-      onMouseMove={() => showControls(false)}
-      onMouseLeave={() => {
-        if (playing && !scrubbingRef.current) setControlsVisible(false);
+      className={`kp ${uiOpen ? "kp-ui-open" : ""} ${isFullscreen ? "kp-fs" : ""}`}
+      onPointerMove={(e) => {
+        if (e.pointerType === "mouse") showControls(false);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse" && playing && !scrubbingRef.current) {
+          setControlsVisible(false);
+        }
       }}
     >
       <video
         ref={videoRef}
-        className="vp-video"
+        className="kp-video"
         playsInline
         preload="none"
         aria-label="Movie player"
       />
 
-      {/* Interactive video surface */}
-      <div className="vp-surface" onPointerUp={onSurfaceClick} />
+      <div className="kp-surface" onPointerUp={onSurfaceUp} />
+      <div className="kp-scrim" />
 
-      {/* Center overlay: preparing / buffering / big play / error */}
-      <div className="vp-center">
-        {!ready && !started ? (
-          <div className="vp-pill-status">
-            <span className="vp-spinner" />
-            <span>{statusText}</span>
-          </div>
-        ) : fatalError ? (
-          <div className="vp-error-box">
-            <p>{fatalError}</p>
-            <button type="button" className="button" onClick={handleRetry}>
-              <RefreshIcon size={15} /> Retry
-            </button>
-          </div>
-        ) : buffering && !needsTap ? (
-          <div className="vp-spinner-wrap" aria-label="Buffering">
-            <span className="vp-spinner vp-spinner-lg" />
-          </div>
-        ) : !started || needsTap || !playing ? (
-          <button
-            type="button"
-            className="vp-big-play"
-            aria-label={needsTap ? "Tap to play" : "Play video"}
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePlay();
-            }}
-          >
-            <PlayIcon size={30} />
-          </button>
-        ) : null}
-
-        {seekFeedback && <div className="vp-seek-toast">{seekFeedback}</div>}
-      </div>
-
-      {/* Top subtle bar */}
-      <div className="vp-top" onClick={(e) => e.stopPropagation()}>
-        <span className="vp-status" role="status" aria-live="polite">
+      {/* Top Overlay Bar */}
+      <div className="kp-top" onClick={(e) => e.stopPropagation()}>
+        <span className="kp-status-pill" role="status" aria-live="polite">
+          <span className={`kp-status-dot ${playing && !buffering ? "live" : ""}`} />
           {statusText}
         </span>
-        <div className="vp-top-actions">
+
+        <div className="kp-top-actions">
           <button
             type="button"
-            className="vp-chip-btn"
-            title="Retry stream"
+            className="kp-pill-btn"
             aria-label="Retry stream"
+            title="Retry stream"
             onClick={handleRetry}
           >
-            <RefreshIcon size={14} />
+            <RefreshIcon size={13} />
           </button>
           <button
             type="button"
-            className="vp-chip-btn"
-            title="Copy VLC stream link"
+            className="kp-pill-btn"
             aria-label="Copy VLC stream link"
+            title="Copy VLC stream link"
             onClick={handleCopyVlc}
           >
-            {copiedVlc ? <CheckIcon size={14} /> : <LinkIcon size={14} />}
+            {copiedVlc ? <CheckIcon size={13} /> : <LinkIcon size={13} />}
             <span>{copiedVlc ? "Copied" : "VLC"}</span>
           </button>
         </div>
       </div>
 
-      {/* Bottom controls */}
-      <div className="vp-controls" onClick={(e) => e.stopPropagation()}>
-        {/* Scrub bar */}
+      {/* Center Transport Controls */}
+      <div className="kp-center">
+        {!ready && !started ? (
+          <div className="kp-loading-pill">
+            <span className="kp-spinner" />
+            <span>{statusText}</span>
+          </div>
+        ) : fatalError ? (
+          <div className="kp-error" onClick={(e) => e.stopPropagation()}>
+            <p>{fatalError}</p>
+            <Button size="sm" onClick={handleRetry}>
+              <RefreshIcon size={14} /> Retry
+            </Button>
+          </div>
+        ) : !started || needsTap ? (
+          <div className="kp-transport always" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="kp-play-hero"
+              aria-label="Play movie"
+              onClick={togglePlay}
+            >
+              <PlayIcon size={28} style={{ marginLeft: 3 }} />
+            </button>
+          </div>
+        ) : (
+          <div
+            className={`kp-transport ${buffering ? "always" : ""}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="kp-skip-hero"
+              aria-label="Back 10 seconds"
+              onClick={() => seekBy(-10, "left")}
+            >
+              <SkipBackIcon size={20} />
+            </button>
+
+            {buffering ? (
+              <div className="kp-buffering-ring" aria-label="Buffering">
+                <span className="kp-spinner kp-spinner-lg" />
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="kp-play-hero"
+                aria-label={playing ? "Pause" : "Play"}
+                onClick={togglePlay}
+              >
+                {playing ? (
+                  <PauseIcon size={26} />
+                ) : (
+                  <PlayIcon size={28} style={{ marginLeft: 3 }} />
+                )}
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="kp-skip-hero"
+              aria-label="Forward 10 seconds"
+              onClick={() => seekBy(10, "right")}
+            >
+              <SkipForwardIcon size={20} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {seekFeedback && (
+        <div className={`kp-seek-badge ${seekFeedback.side}`}>{seekFeedback.label}</div>
+      )}
+
+      {/* Bottom Scrubber & Action Row */}
+      <div className="kp-bottom" onClick={(e) => e.stopPropagation()}>
         <div
           ref={scrubRef}
-          className={`vp-scrub ${scrubTime !== null ? "vp-scrubbing" : ""}`}
+          className={`kp-scrub ${scrubTime !== null ? "active" : ""}`}
           role="slider"
-          aria-label="Seek"
+          aria-label="Seek timeline"
           aria-valuemin={0}
           aria-valuemax={Math.floor(duration)}
           aria-valuenow={Math.floor(displayTime)}
@@ -1211,61 +1240,46 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
           onPointerUp={onScrubUp}
           onPointerCancel={onScrubUp}
         >
-          <div className="vp-scrub-track">
-            <div className="vp-scrub-buffered" style={{ width: `${bufferedPct}%` }} />
-            <div className="vp-scrub-played" style={{ width: `${playedPct}%` }} />
-            <div className="vp-scrub-thumb" style={{ left: `${playedPct}%` }} />
+          <div className="kp-scrub-rail">
+            <div className="kp-scrub-buf" style={{ width: `${bufferedPct}%` }} />
+            <div className="kp-scrub-fill" style={{ width: `${playedPct}%` }} />
+            <div className="kp-scrub-knob" style={{ left: `${playedPct}%` }} />
           </div>
           {scrubTime !== null && (
-            <div className="vp-scrub-tip" style={{ left: `${playedPct}%` }}>
+            <div className="kp-scrub-tip" style={{ left: `${playedPct}%` }}>
               {formatClock(scrubTime)}
             </div>
           )}
         </div>
 
-        {/* Control buttons row */}
-        <div className="vp-bar">
-          <div className="vp-bar-left">
+        <div className="kp-row">
+          <div className="kp-row-left">
             <button
               type="button"
-              className="vp-btn"
+              className="kp-btn kp-desktop-only"
               disabled={!ready}
               aria-label={playing ? "Pause" : "Play"}
               onClick={togglePlay}
             >
-              {playing ? <PauseIcon size={19} /> : <PlayIcon size={19} />}
-            </button>
-            <button
-              type="button"
-              className="vp-btn"
-              disabled={!started}
-              aria-label="Back 10 seconds"
-              onClick={() => seekBy(-10)}
-            >
-              <SkipBackIcon size={18} />
-            </button>
-            <button
-              type="button"
-              className="vp-btn"
-              disabled={!started}
-              aria-label="Forward 10 seconds"
-              onClick={() => seekBy(10)}
-            >
-              <SkipForwardIcon size={18} />
+              {playing ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
             </button>
 
-            <div className="vp-vol">
+            <div className="kp-vol">
               <button
                 type="button"
-                className="vp-btn"
+                className="kp-btn"
                 aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
                 onClick={toggleMute}
               >
-                {muted || volume === 0 ? <VolumeMuteIcon size={18} /> : <VolumeIcon size={18} />}
+                {muted || volume === 0 ? (
+                  <VolumeMuteIcon size={17} />
+                ) : (
+                  <VolumeIcon size={17} />
+                )}
               </button>
               <input
                 type="range"
-                className="vp-vol-slider"
+                className="kp-vol-range"
                 aria-label="Volume"
                 min={0}
                 max={1}
@@ -1281,18 +1295,18 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
               />
             </div>
 
-            <span className="vp-time">
+            <span className="kp-time">
               {formatClock(displayTime)}
-              <span className="vp-time-sep">/</span>
+              <span className="kp-time-sep">/</span>
               {formatClock(duration)}
             </span>
           </div>
 
-          <div className="vp-bar-right">
+          <div className="kp-row-right">
             <button
               type="button"
-              className="vp-btn vp-rate-btn"
-              aria-label={`Playback speed ${rate}x`}
+              className="kp-btn kp-rate"
+              aria-label={`Speed ${rate}x`}
               title="Playback speed"
               onClick={cycleRate}
             >
@@ -1301,7 +1315,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
             <button
               ref={subBtnRef}
               type="button"
-              className={`vp-btn ${subActive ? "vp-btn-active" : ""}`}
+              className={`kp-btn ${subActive ? "active" : ""}`}
               aria-label="Subtitles"
               title="Subtitles (C)"
               onClick={() => setSubOpenSignal((n) => n + 1)}
@@ -1310,12 +1324,16 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
             </button>
             <button
               type="button"
-              className="vp-btn"
+              className="kp-btn"
               aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
               title="Fullscreen (F)"
               onClick={toggleFullscreen}
             >
-              {isFullscreen ? <ExitFullscreenIcon size={18} /> : <FullscreenIcon size={18} />}
+              {isFullscreen ? (
+                <ExitFullscreenIcon size={17} />
+              ) : (
+                <FullscreenIcon size={17} />
+              )}
             </button>
           </div>
         </div>

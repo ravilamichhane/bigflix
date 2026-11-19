@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { client, errMessage, setToken } from "../api";
+import { BrandMarkIcon } from "./Icons";
+import { Button } from "./ui";
 
 interface LockScreenProps {
   onUnlock: () => void;
@@ -34,15 +36,18 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
   return (
     <div className="lock-screen">
       <div className="lock-card">
-        <div className="brand">
-          <span className="brand-mark">b</span>
-          <span>bigflix</span>
+        <div className="kino-brand">
+          <span className="kino-brand-mark">
+            <BrandMarkIcon size={15} />
+          </span>
+          <span>Bigflix</span>
         </div>
-        <h1>Unlock</h1>
-        <p>Enter your access token to continue.</p>
+        <h1>Unlock library</h1>
+        <p>Enter your server access token to browse and stream.</p>
         <form className="lock-form" onSubmit={handleSubmit}>
           <input
             type="password"
+            className="ds-input"
             aria-label="Access token"
             placeholder="Access token"
             value={input}
@@ -51,13 +56,13 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
             autoComplete="current-password"
           />
           {error && (
-            <div className="error-banner" role="alert">
+            <div className="ds-alert ds-alert-danger" role="alert" style={{ margin: 0 }}>
               {error}
             </div>
           )}
-          <button className="button" type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy}>
             {busy ? "Verifying…" : "Unlock"}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

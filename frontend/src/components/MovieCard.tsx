@@ -13,14 +13,14 @@ export function MovieCard({ movie, navigate }: MovieCardProps) {
 
   return (
     <a
-      className="movie-card"
+      className="poster-card"
       href={href}
       onClick={(e) => {
         e.preventDefault();
         navigate(href);
       }}
     >
-      <div className="poster">
+      <div className="poster-frame">
         {movie.poster && !broken && (
           <img
             src={movie.poster}
@@ -33,12 +33,18 @@ export function MovieCard({ movie, navigate }: MovieCardProps) {
         <div className="poster-fallback" aria-hidden="true">
           <strong>{movie.title}</strong>
         </div>
-        {movie.rating > 0 && <span className="rating">★ {movie.rating.toFixed(1)}</span>}
+        {movie.rating > 0 && <span className="poster-rating">★ {movie.rating.toFixed(1)}</span>}
       </div>
-      <h2>{movie.title}</h2>
-      <div className="card-meta">
-        <span>{movie.year || "—"}</span>
-        {movie.tmdbId ? <span>Sources</span> : movie.language ? <span>{movie.language}</span> : null}
+      <div className="poster-info">
+        <h2>{movie.title}</h2>
+        <div className="poster-meta">
+          <span className="mono">{movie.year || "—"}</span>
+          {movie.tmdbId ? (
+            <span>Sources</span>
+          ) : movie.language ? (
+            <span>{movie.language}</span>
+          ) : null}
+        </div>
       </div>
     </a>
   );

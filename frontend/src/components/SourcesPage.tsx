@@ -4,6 +4,7 @@ import type { FindSourcesResponse } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
 import { ArrowLeftIcon } from "./Icons";
 import { MovieCard } from "./MovieCard";
+import { Button, EmptyState } from "./ui";
 
 interface SourcesPageProps {
   tmdbId: number;
@@ -41,10 +42,10 @@ export function SourcesPage({ tmdbId, navigate }: SourcesPageProps) {
   }, [tmdbId, navigate]);
 
   return (
-    <div className="browse-page">
+    <div>
       <a
         href="/"
-        className="back"
+        className="ds-back"
         onClick={(e) => {
           e.preventDefault();
           navigate("/");
@@ -52,52 +53,33 @@ export function SourcesPage({ tmdbId, navigate }: SourcesPageProps) {
       >
         <ArrowLeftIcon size={16} /> Back
       </a>
-      <div className="page-head">
+
+      <div className="page-title-row">
         <h1>Matching sources</h1>
       </div>
 
       {loading ? (
-        <div className="empty">
-          <p>Searching sources…</p>
-        </div>
+        <EmptyState title="Searching sources…" />
       ) : error ? (
-        <div className="empty">
-          <h2>Unable to match sources</h2>
-          <p>{error}</p>
-          <a
-            className="button"
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/");
-            }}
-          >
-            Browse movies
-          </a>
-        </div>
+        <EmptyState
+          title="Unable to match sources"
+          description={error}
+          actions={<Button onClick={() => navigate("/")}>Browse movies</Button>}
+        />
       ) : (
         <>
-          {data?.notice && <p className="notice">{data.notice}</p>}
-          <div className="movie-grid">
+          {data?.notice && <div className="ds-alert">{data.notice}</div>}
+          <div className="poster-grid">
             {data?.movies.length ? (
               data.movies.map((m) => (
                 <MovieCard key={m.id} movie={m} navigate={navigate} />
               ))
             ) : (
-              <div className="empty">
-                <h2>No matching sources</h2>
-                <p>No YTS listing matched this title’s IMDb ID.</p>
-                <a
-                  className="button"
-                  href="/"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate("/");
-                  }}
-                >
-                  Browse movies
-                </a>
-              </div>
+              <EmptyState
+                title="No matching sources"
+                description="No YTS listing matched this title’s IMDb ID."
+                actions={<Button onClick={() => navigate("/")}>Browse movies</Button>}
+              />
             )}
           </div>
         </>

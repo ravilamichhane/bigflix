@@ -4,6 +4,7 @@ import type { ListMoviesResponse } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
 import { CloseIcon, SearchIcon } from "./Icons";
 import { MovieCard } from "./MovieCard";
+import { Badge, Button, EmptyState } from "./ui";
 
 const GENRES = [
   "Action",
@@ -94,202 +95,181 @@ export function BrowsePage({ search, navigate }: BrowsePageProps) {
   const hasTmdb = data?.hasTmdb ?? false;
 
   return (
-    <div className="browse-page">
-      <div className="browse-toolbar">
-        <form className="search" onSubmit={handleSearch}>
-          <SearchIcon size={16} className="search-icon" />
-          <input
-            aria-label="Search movies"
-            placeholder="Search movies or IMDb ID…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            maxLength={200}
-          />
-          {searchInput && (
-            <button
-              type="button"
-              className="search-clear"
-              aria-label="Clear search"
-              onClick={() => {
-                setSearchInput("");
-                if (query) navigate(buildUrl({ feed: "", q: "", page: "" }));
-              }}
-            >
-              <CloseIcon size={14} />
-            </button>
-          )}
-        </form>
-
-        {feed === "library" && (
-          <div className="filter-selects">
-            <select
-              aria-label="Genre"
-              value={genre}
-              onChange={(e) =>
-                navigate(buildUrl({ feed: "", q: query, genre: e.target.value, page: "" }))
-              }
-            >
-              <option value="">All genres</option>
-              {GENRES.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Sort by"
-              value={sort}
-              onChange={(e) =>
-                navigate(
-                  buildUrl({
-                    feed: "",
-                    q: query,
-                    sort: e.target.value === "date_added" ? "" : e.target.value,
-                    page: "",
-                  }),
-                )
-              }
-            >
-              <option value="date_added">Recent</option>
-              <option value="rating">Top rated</option>
-              <option value="year">Newest year</option>
-            </select>
-          </div>
-        )}
-      </div>
-
-      <div className="feed-bar">
-        <div className="tabs">
-          {[
-            { id: "library", label: "Library" },
-            { id: "day", label: "Trending today" },
-            { id: "week", label: "This week" },
-            { id: "new", label: "New releases" },
-          ].map((t) => {
-            const href = t.id === "library" ? "/" : `/?feed=${t.id}`;
-            return (
-              <a
-                key={t.id}
-                href={href}
-                className={feed === t.id ? "active" : ""}
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate(href);
+    <div>
+      <section className="browse-head">
+        <div className="browse-controls">
+          <form className="search-box" onSubmit={handleSearch}>
+            <SearchIcon size={16} className="search-box-icon" />
+            <input
+              aria-label="Search movies"
+              placeholder="Search titles or IMDb ID…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              maxLength={200}
+            />
+            {searchInput && (
+              <button
+                type="button"
+                className="search-box-clear"
+                aria-label="Clear search"
+                onClick={() => {
+                  setSearchInput("");
+                  if (query) navigate(buildUrl({ feed: "", q: "", page: "" }));
                 }}
               >
-                {t.label}
-              </a>
-            );
-          })}
+                <CloseIcon size={13} />
+              </button>
+            )}
+          </form>
+
+          {feed === "library" && (
+            <div className="filter-group">
+              <select
+                className="ds-select"
+                aria-label="Genre"
+                value={genre}
+                onChange={(e) =>
+                  navigate(buildUrl({ feed: "", q: query, genre: e.target.value, page: "" }))
+                }
+              >
+                <option value="">All genres</option>
+                {GENRES.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="ds-select"
+                aria-label="Sort by"
+                value={sort}
+                onChange={(e) =>
+                  navigate(
+                    buildUrl({
+                      feed: "",
+                      q: query,
+                      sort: e.target.value === "date_added" ? "" : e.target.value,
+                      page: "",
+                    }),
+                  )
+                }
+              >
+                <option value="date_added">Recent</option>
+                <option value="rating">Top rated</option>
+                <option value="year">Release year</option>
+              </select>
+            </div>
+          )}
         </div>
-        {!!data?.count && <span className="count">{data.count.toLocaleString()}</span>}
-      </div>
+
+        <div className="browse-subbar">
+          <div className="feed-scroll">
+            <div className="ds-seg">
+              {[
+                { id: "library", label: "Library" },
+                { id: "day", label: "Trending" },
+                { id: "week", label: "This week" },
+                { id: "new", label: "New" },
+              ].map((t) => {
+                const href = t.id === "library" ? "/" : `/?feed=${t.id}`;
+                return (
+                  <a
+                    key={t.id}
+                    href={href}
+                    className={`ds-seg-item ${feed === t.id ? "active" : ""}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate(href);
+                    }}
+                  >
+                    {t.label}
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+
+          {!!data?.count && <Badge className="mono">{data.count.toLocaleString()}</Badge>}
+        </div>
+      </section>
 
       {loading && !data ? (
-        <div className="skeleton-grid" aria-label="Loading movies">
+        <div className="poster-grid" aria-label="Loading movies">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="skeleton-card">
-              <div className="skeleton-poster" />
-              <div className="skeleton-line" />
-              <div className="skeleton-line short" />
+            <div key={i} className="poster-card">
+              <div className="skeleton-frame" />
+              <div className="poster-info">
+                <div className="skeleton-bar" />
+                <div className="skeleton-bar sm" />
+              </div>
             </div>
           ))}
         </div>
       ) : displayError ? (
-        <div className="empty">
-          <h2>
-            {!hasTmdb && feed !== "library" ? "TMDB not configured" : "Couldn’t load catalog"}
-          </h2>
-          <p>{displayError}</p>
-          <div className="empty-actions">
-            <a
-              className="button"
-              href="/settings"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate("/settings");
-              }}
-            >
-              Settings
-            </a>
-            <a
-              className="button secondary"
-              href="/"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate("/");
-              }}
-            >
-              Library
-            </a>
-          </div>
-        </div>
+        <EmptyState
+          title={!hasTmdb && feed !== "library" ? "TMDB not configured" : "Couldn’t load catalog"}
+          description={displayError}
+          actions={
+            <>
+              <Button onClick={() => navigate("/settings")}>Settings</Button>
+              <Button variant="secondary" onClick={() => navigate("/")}>
+                Back to Library
+              </Button>
+            </>
+          }
+        />
       ) : (
         <>
           {data?.stale && (
-            <div className="notice">
+            <div className="ds-alert ds-alert-warn">
               Showing cached results · last updated {formatTime(data.updatedAt)}
             </div>
           )}
-          {data?.notice && <p className="notice">{data.notice}</p>}
+          {data?.notice && <div className="ds-alert">{data.notice}</div>}
 
-          <div className="movie-grid">
+          <div className="poster-grid">
             {data?.movies.length ? (
               data.movies.map((m) => (
                 <MovieCard key={`${m.id}-${m.tmdbId}`} movie={m} navigate={navigate} />
               ))
             ) : (
-              <div className="empty">
-                <h2>No movies found</h2>
-                <p>Try a different title, IMDb ID, or genre.</p>
-                <a
-                  className="button"
-                  href="/"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate("/");
-                  }}
-                >
-                  Clear filters
-                </a>
-              </div>
+              <EmptyState
+                title="No movies found"
+                description="Try a different title, IMDb ID, or genre filter."
+                actions={<Button onClick={() => navigate("/")}>Reset filters</Button>}
+              />
             )}
           </div>
 
           {(data?.hasPrev || data?.hasNext) && (
             <div className="pagination">
               {data?.hasPrev && (
-                <a
-                  className="button secondary"
-                  href={buildUrl({ page: page - 1 })}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(buildUrl({ page: page - 1 }));
-                  }}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => navigate(buildUrl({ page: page - 1 }))}
                 >
                   ← Previous
-                </a>
+                </Button>
               )}
-              {!!data?.page && <span className="page-num">Page {data.page}</span>}
+              {!!data?.page && <span className="pagination-label">Page {data.page}</span>}
               {data?.hasNext && (
-                <a
-                  className="button secondary"
-                  href={buildUrl({ page: page + 1 })}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(buildUrl({ page: page + 1 }));
-                  }}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => navigate(buildUrl({ page: page + 1 }))}
                 >
                   Next →
-                </a>
+                </Button>
               )}
             </div>
           )}
 
           {feed !== "library" && (
             <p className="attribution">
-              Metadata by{" "}
-              <a href="https://www.themoviedb.org/" rel="noreferrer">
+              Metadata provided by{" "}
+              <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">
                 TMDB
               </a>
               .

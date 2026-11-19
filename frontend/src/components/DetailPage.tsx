@@ -3,6 +3,7 @@ import { client, errMessage, formatTime } from "../api";
 import type { GetMovieResponse } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
 import { ArrowLeftIcon, CheckIcon, CopyIcon, DownloadIcon, PlayIcon } from "./Icons";
+import { Badge, Button, EmptyState } from "./ui";
 
 interface DetailPageProps {
   id: number;
@@ -70,10 +71,10 @@ export function DetailPage({ id, navigate }: DetailPageProps) {
   const movie = data?.movie;
 
   return (
-    <div className="detail-page">
+    <div>
       <a
         href="/"
-        className="back"
+        className="ds-back"
         onClick={(e) => {
           e.preventDefault();
           navigate("/");
@@ -83,144 +84,155 @@ export function DetailPage({ id, navigate }: DetailPageProps) {
       </a>
 
       {loading ? (
-        <div className="empty">
-          <p>Loading…</p>
-        </div>
+        <EmptyState title="Loading movie…" />
       ) : error && !movie ? (
-        <div className="empty">
-          <h2>Movie unavailable</h2>
-          <p>{error}</p>
-          <a
-            className="button"
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/");
-            }}
-          >
-            Browse movies
-          </a>
-        </div>
+        <EmptyState
+          title="Movie unavailable"
+          description={error}
+          actions={<Button onClick={() => navigate("/")}>Browse movies</Button>}
+        />
       ) : (
         movie && (
           <>
-            <section className="movie-detail">
-              <div className="detail-poster poster">
-                {movie.poster && !posterBroken && (
-                  <img
-                    src={movie.poster}
-                    alt={`${movie.title} poster`}
-                    onError={() => setPosterBroken(true)}
-                  />
-                )}
-                <div className="poster-fallback">
-                  <strong>{movie.title}</strong>
-                </div>
-              </div>
-
-              <div className="detail-copy">
-                <h1>{movie.title}</h1>
-                <div className="detail-meta">
-                  {movie.rating > 0 && <span className="score">★ {movie.rating.toFixed(1)}</span>}
-                  {!!movie.year && <span>{movie.year}</span>}
-                  {!!movie.runtime && <span>{movie.runtime}m</span>}
-                  {movie.language && <span>{movie.language}</span>}
-                  {movie.imdbCode && (
-                    <a
-                      className="meta-link"
-                      href={`https://www.imdb.com/title/${movie.imdbCode}/`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      IMDb ↗
-                    </a>
+            <section className="detail-hero">
+              {movie.poster && !posterBroken && (
+                <div
+                  className="detail-backdrop"
+                  style={{ backgroundImage: `url(${movie.poster})` }}
+                  aria-hidden="true"
+                />
+              )}
+              <div className="detail-hero-grid">
+                <div className="detail-poster poster-frame">
+                  {movie.poster && !posterBroken && (
+                    <img
+                      src={movie.poster}
+                      alt={`${movie.title} poster`}
+                      onError={() => setPosterBroken(true)}
+                    />
                   )}
+                  <div className="poster-fallback">
+                    <strong>{movie.title}</strong>
+                  </div>
                 </div>
 
-                {movie.genres.length > 0 && (
-                  <div className="genre-tags">
-                    {movie.genres.map((g) => (
-                      <span key={g}>{g}</span>
-                    ))}
-                  </div>
-                )}
+                <div className="detail-copy">
+                  <h1>{movie.title}</h1>
 
-                {movie.summary && <p className="synopsis">{movie.summary}</p>}
+                  <div className="detail-facts">
+                    {movie.rating > 0 && (
+                      <Badge tone="accent" className="mono">
+                        ★ {movie.rating.toFixed(1)}
+                      </Badge>
+                    )}
+                    {!!movie.year && <Badge className="mono">{movie.year}</Badge>}
+                    {!!movie.runtime && <Badge className="mono">{movie.runtime}m</Badge>}
+                    {movie.language && <Badge>{movie.language}</Badge>}
+                    {movie.imdbCode && (
+                      <a
+                        className="ds-link"
+                        href={`https://www.imdb.com/title/${movie.imdbCode}/`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        IMDb ↗
+                      </a>
+                    )}
+                  </div>
+
+                  {movie.genres.length > 0 && (
+                    <div className="detail-genres">
+                      {movie.genres.map((g) => (
+                        <Badge key={g}>{g}</Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  {movie.summary && <p className="detail-synopsis">{movie.summary}</p>}
+                </div>
               </div>
             </section>
 
             {error && (
-              <div className="error-banner" role="alert">
+              <div className="ds-alert ds-alert-danger" role="alert">
                 {error}
               </div>
             )}
 
-            <section className="sources">
-              <div className="section-head">
-                <h2>Sources</h2>
-                <span className="count">{movie.torrents.length}</span>
+            <section className="sources-section">
+              <div className="section-bar">
+                <h2>Available sources</h2>
+                <Badge className="mono">{movie.torrents.length}</Badge>
               </div>
 
               <div className="source-grid">
                 {movie.torrents.length ? (
-                  movie.torrents.map((t) => (
-                    <article key={t.hash} className="source-card">
-                      <div className="source-top">
-                        <div className="source-quality">
-                          <strong>{t.quality}</strong>
-                          <span className="tag">{t.type}</span>
+                  movie.torrents.map((t) => {
+                    const health =
+                      t.seeds >= 30 ? "health-good" : t.seeds >= 8 ? "health-mid" : "health-low";
+                    return (
+                      <article key={t.hash} className="source-card">
+                        <div className="source-head">
+                          <div className="source-title">
+                            <strong>{t.quality}</strong>
+                            <Badge>{t.type}</Badge>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Copy info hash"
+                            aria-label="Copy info hash"
+                            onClick={() => void copyHash(t.hash)}
+                          >
+                            {copiedHash === t.hash ? (
+                              <CheckIcon size={14} />
+                            ) : (
+                              <CopyIcon size={14} />
+                            )}
+                          </Button>
                         </div>
-                        <button
-                          type="button"
-                          className="icon-btn-sm"
-                          title="Copy info hash"
-                          aria-label="Copy info hash"
-                          onClick={() => void copyHash(t.hash)}
-                        >
-                          {copiedHash === t.hash ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-                        </button>
-                      </div>
 
-                      <div className="source-meta">
-                        <span>{t.size}</span>
-                        {t.videoCodec && <span>{t.videoCodec}</span>}
-                        <span>
-                          {t.seeds} seeds · {t.peers} peers
-                        </span>
-                      </div>
+                        <div className="source-specs">
+                          <span>{t.size}</span>
+                          {t.videoCodec && <span>{t.videoCodec}</span>}
+                          <span>
+                            <span className={`health-dot ${health}`} />
+                            {t.seeds} seeds · {t.peers} peers
+                          </span>
+                        </div>
 
-                      <div className="source-actions">
-                        <button
-                          type="button"
-                          className="button"
-                          disabled={startingHash === t.hash}
-                          onClick={() => void start(t.hash, false)}
-                        >
-                          <PlayIcon size={14} />
-                          {startingHash === t.hash ? "Starting…" : "Watch"}
-                        </button>
-                        <button
-                          type="button"
-                          className="button secondary"
-                          disabled={startingHash === t.hash}
-                          onClick={() => void start(t.hash, true)}
-                        >
-                          <DownloadIcon size={14} /> Keep
-                        </button>
-                      </div>
-                    </article>
-                  ))
+                        <div className="source-actions">
+                          <Button
+                            disabled={startingHash === t.hash}
+                            onClick={() => void start(t.hash, false)}
+                          >
+                            <PlayIcon size={14} />
+                            {startingHash === t.hash ? "Starting…" : "Watch"}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            disabled={startingHash === t.hash}
+                            onClick={() => void start(t.hash, true)}
+                          >
+                            <DownloadIcon size={14} /> Keep
+                          </Button>
+                        </div>
+                      </article>
+                    );
+                  })
                 ) : (
-                  <div className="empty">
-                    <h2>No sources listed</h2>
-                    <p>No valid torrent variants were returned for this title.</p>
-                  </div>
+                  <EmptyState
+                    title="No sources listed"
+                    description="No valid torrent variants were returned for this title."
+                  />
                 )}
               </div>
             </section>
 
             {data?.stale && (
-              <p className="notice">Cached metadata · updated {formatTime(data.updatedAt)}</p>
+              <div className="ds-alert ds-alert-warn">
+                Cached metadata · updated {formatTime(data.updatedAt)}
+              </div>
             )}
           </>
         )

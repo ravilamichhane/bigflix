@@ -6,6 +6,7 @@ import type {
   SubtitleTrack,
 } from "../gen/bigflix/v1/bigflix_pb";
 import { CloseIcon } from "./Icons";
+import { Button } from "./ui";
 
 const LANGUAGES = [
   { value: "en", label: "English" },
@@ -258,7 +259,7 @@ export function SubtitleDialog({
     <dialog
       ref={dialogRef}
       id="subtitle-dialog"
-      className="subtitle-panel"
+      className="ds-dialog"
       aria-labelledby="subtitle-title"
       onClose={() => onCloseFocus?.()}
       onKeyDown={(e) => e.stopPropagation()}
@@ -276,21 +277,23 @@ export function SubtitleDialog({
         }
       }}
     >
-      <div className="dialog-head">
+      <div className="ds-dialog-head">
         <h2 id="subtitle-title">Subtitles</h2>
-        <button
-          type="button"
-          className="icon-btn"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label="Close subtitles"
           onClick={() => dialogRef.current?.close()}
         >
-          <CloseIcon size={18} />
-        </button>
+          <CloseIcon size={17} />
+        </Button>
       </div>
 
-      <div className="seg-tabs" role="group" aria-label="Subtitle sources">
+      <div className="ds-seg" role="group" aria-label="Subtitle sources" style={{ width: "100%" }}>
         <button
           type="button"
+          className="ds-seg-item"
+          style={{ flex: 1 }}
           aria-pressed={tab === "online"}
           onClick={() => setTab("online")}
         >
@@ -298,6 +301,8 @@ export function SubtitleDialog({
         </button>
         <button
           type="button"
+          className="ds-seg-item"
+          style={{ flex: 1 }}
           aria-pressed={tab === "saved"}
           onClick={() => setTab("saved")}
         >
@@ -305,6 +310,8 @@ export function SubtitleDialog({
         </button>
         <button
           type="button"
+          className="ds-seg-item"
+          style={{ flex: 1 }}
           aria-pressed={tab === "upload"}
           onClick={() => setTab("upload")}
         >
@@ -313,10 +320,14 @@ export function SubtitleDialog({
       </div>
 
       <div hidden={tab !== "online"}>
-        <div className="subtitle-controls">
+        <div className="sub-controls">
           <label>
             Language
-            <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <select
+              className="ds-select"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
               {LANGUAGES.map((l) => (
                 <option key={l.value} value={l.value}>
                   {l.label}
@@ -324,51 +335,46 @@ export function SubtitleDialog({
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            className="button"
-            disabled={busy}
-            onClick={() => void handleSearch()}
-          >
+          <Button disabled={busy} onClick={() => void handleSearch()}>
             {busy ? "Searching…" : "Search"}
-          </button>
+          </Button>
         </div>
-        <div className="subtitle-list">
+
+        <div className="sub-results">
           {results.map((match) => (
-            <div key={match.id} className="subtitle-result">
-              <div className="subtitle-result-info">
+            <div key={match.id} className="sub-row">
+              <div className="sub-row-info">
                 <span>{match.label}</span>
                 <small>
                   Rating {match.rating}
                   {match.hearingImpaired ? " · SDH" : ""}
                 </small>
               </div>
-              <div className="subtitle-result-actions">
-                <button
-                  type="button"
-                  className="button secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void handleAdd({
-                      action: "download",
-                      id: match.id,
-                      label: match.label,
-                    })
-                  }
-                >
-                  Use
-                </button>
-              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  void handleAdd({
+                    action: "download",
+                    id: match.id,
+                    label: match.label,
+                  })
+                }
+              >
+                Use
+              </Button>
             </div>
           ))}
         </div>
       </div>
 
       <div hidden={tab !== "saved"}>
-        <div className="subtitle-controls">
+        <div className="sub-controls">
           <label>
             Active track
             <select
+              className="ds-select"
               value={preferred}
               onChange={(e) => void selectTrack(e.target.value, tracks, offset)}
             >
@@ -380,10 +386,11 @@ export function SubtitleDialog({
               ))}
             </select>
           </label>
-          <label className="offset-field">
-            Timing offset (s)
+          <label className="sub-offset">
+            Offset (sec)
             <input
               id="subtitle-delay"
+              className="ds-input mono"
               type="number"
               min={-120}
               max={120}
@@ -397,43 +404,44 @@ export function SubtitleDialog({
             />
           </label>
         </div>
-        <p className="muted">Positive shows subtitles later; negative earlier.</p>
+        <p className="muted">Positive delays subtitles; negative shows them earlier.</p>
         {bundled.length > 0 && (
-          <div id="subtitle-bundled">
+          <div className="sub-bundled">
             {bundled.map((file) => (
-              <button
+              <Button
                 key={file.index}
-                type="button"
-                className="button secondary"
+                variant="secondary"
+                size="sm"
                 disabled={busy}
                 onClick={() => void handleAdd({ action: "bundled", index: file.index })}
               >
                 Use {file.name}
-              </button>
+              </Button>
             ))}
           </div>
         )}
       </div>
 
       <div hidden={tab !== "upload"}>
-        <div className="subtitle-controls">
+        <div className="sub-controls">
           <label>
-            SRT or WebVTT file (max 2 MB)
-            <input ref={fileInputRef} type="file" accept=".srt,.vtt,text/vtt" />
+            SRT or WebVTT (max 2 MB)
+            <input
+              ref={fileInputRef}
+              className="ds-input"
+              style={{ paddingTop: 7 }}
+              type="file"
+              accept=".srt,.vtt,text/vtt"
+            />
           </label>
-          <button
-            type="button"
-            className="button"
-            disabled={busy}
-            onClick={() => void handleUpload()}
-          >
+          <Button disabled={busy} onClick={() => void handleUpload()}>
             Upload
-          </button>
+          </Button>
         </div>
       </div>
 
       {status && (
-        <p id="subtitle-status" role="status" aria-live="polite">
+        <p className="sub-status" role="status" aria-live="polite">
           {status}
         </p>
       )}

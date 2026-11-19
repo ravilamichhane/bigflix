@@ -5,10 +5,18 @@ import type { DownloadStatus } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
 import { ArrowLeftIcon, DownloadIcon, TrashIcon } from "./Icons";
 import { VideoPlayer } from "./VideoPlayer";
+import { Badge, Button, EmptyState, ProgressBar } from "./ui";
 
 interface WatchPageProps {
   hash: string;
   navigate: NavigateFn;
+}
+
+function stateTone(state?: string): "ok" | "accent" | "warn" | "neutral" {
+  if (state === "complete") return "ok";
+  if (state === "downloading") return "accent";
+  if (state === "paused" || state === "metadata") return "warn";
+  return "neutral";
 }
 
 export function WatchPage({ hash, navigate }: WatchPageProps) {
@@ -103,10 +111,10 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
       : "");
 
   return (
-    <div className="watch-page">
-      <div className="watch-header">
+    <div className="watch-shell">
+      <div className="watch-top">
         <a
-          className="back"
+          className="ds-back"
           href="/downloads"
           onClick={(e) => {
             e.preventDefault();
@@ -115,36 +123,31 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
         >
           <ArrowLeftIcon size={16} /> Downloads
         </a>
-        <h1>{latest?.title || "Loading…"}</h1>
+        <div className="watch-top-row">
+          <h1>{latest?.title || "Loading…"}</h1>
+          {latest?.state && <Badge tone={stateTone(latest.state)}>{latest.state}</Badge>}
+        </div>
       </div>
 
       {streamError && !latest ? (
-        <div className="empty">
-          <h2>Download unavailable</h2>
-          <p>{streamError}</p>
-          <a
-            className="button"
-            href="/downloads"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/downloads");
-            }}
-          >
-            Back to downloads
-          </a>
-        </div>
+        <EmptyState
+          title="Download unavailable"
+          description={streamError}
+          actions={<Button onClick={() => navigate("/downloads")}>Back to downloads</Button>}
+        />
       ) : (
         <>
-          <div className="player-shell">
+          <div className="player-stage">
             <VideoPlayer hash={hash} latest={latest} onCodecNoteChange={setCodecNote} />
           </div>
 
           {latest?.state === "select-file" && (
-            <section id="file-picker" className="panel-card">
+            <section className="ds-card">
               <h2>Select video file</h2>
               <div className="file-picker-row">
                 <select
                   id="file-select"
+                  className="ds-select"
                   aria-label="Video file"
                   value={selectedFile}
                   onChange={(e) => setSelectedFile(e.target.value)}
@@ -155,90 +158,91 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
                     </option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  className="button"
+                <Button
                   disabled={actionBusy}
                   onClick={() => void runAction("select", Number(selectedFile))}
                 >
                   Use video
-                </button>
+                </Button>
               </div>
             </section>
           )}
 
-          <section className="panel-card download-panel">
-            <div className="dl-head">
-              <div className="dl-title-group">
-                <span className="dl-state">{latest?.state || "loading"}</span>
-                {latest && (
-                  <span className="dl-meta">
-                    {formatBytes(latest.completed)} / {formatBytes(latest.size)}
-                    {latest.speed > 0n ? ` · ${formatBytes(latest.speed)}/s` : ""}
-                    {` · ${latest.peers} peers`}
-                    {latest.discovering ? " · searching…" : ""}
-                  </span>
+          <section className="ds-card dl-card">
+            <div className="dl-card-head">
+              <div className="dl-stats">
+                {latest ? (
+                  <>
+                    <span>
+                      {formatBytes(latest.completed)} / {formatBytes(latest.size)}
+                    </span>
+                    {latest.speed > 0n && <span>{formatBytes(latest.speed)}/s</span>}
+                    <span>
+                      {latest.peers} peers{latest.discovering ? " · searching…" : ""}
+                    </span>
+                  </>
+                ) : (
+                  <span>Waiting for status…</span>
                 )}
               </div>
-              <strong className="dl-pct">
+              <span className="dl-pct">
                 {latest ? `${(latest.progress * 100).toFixed(1)}%` : "0%"}
-              </strong>
+              </span>
             </div>
 
-            <progress
-              id="download-progress"
-              max={1}
-              value={latest?.progress || 0}
-              aria-label="Download completion"
-            />
+            <ProgressBar value={latest?.progress || 0} label="Download completion" />
 
             {warningText && (
-              <p className="dl-warn" role="alert">
+              <div className="ds-alert ds-alert-warn" role="alert" style={{ margin: 0 }}>
                 {warningText}
+              </div>
+            )}
+
+            {codecNote && (
+              <p className="muted" style={{ margin: 0 }}>
+                {codecNote}
               </p>
             )}
 
-            {codecNote && <p className="muted dl-note">{codecNote}</p>}
-
-            <div className="download-controls">
-              <button
-                type="button"
-                className="button secondary"
+            <div className="dl-actions">
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={actionBusy || !latest}
                 onClick={() => void runAction(latest?.paused ? "resume" : "pause")}
               >
                 {latest?.paused ? "Resume" : "Pause"}
-              </button>
-              <button
-                type="button"
-                className="button secondary"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={actionBusy || !latest}
                 onClick={() => void runAction(latest?.keep ? "unkeep" : "keep")}
               >
                 {latest?.keep ? "Kept" : "Keep"}
-              </button>
-              <button
-                type="button"
-                className="button secondary"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={actionBusy || !latest}
                 onClick={() => void runAction("reconnect")}
               >
                 Find peers
-              </button>
+              </Button>
               <a
-                className="button secondary"
+                className="ds-btn ds-btn-secondary ds-btn-sm"
                 href={mediaUrl(`/media/${hash}?download=1`)}
               >
-                <DownloadIcon size={15} /> Save
+                <DownloadIcon size={14} /> Save file
               </a>
-              <button
-                type="button"
-                className="button danger"
+              <Button
+                variant="danger"
+                size="sm"
                 disabled={actionBusy || !latest}
                 onClick={() => void handleDelete()}
               >
-                <TrashIcon size={15} /> Delete
-              </button>
+                <TrashIcon size={14} /> Delete
+              </Button>
             </div>
           </section>
         </>
