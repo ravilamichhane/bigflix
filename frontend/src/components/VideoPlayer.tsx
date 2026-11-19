@@ -140,7 +140,7 @@ export function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
-  const [quality, setQuality] = useState<QualityMode>("auto");
+  const [quality, setQuality] = useState<QualityMode>("original");
   const [qualityOpen, setQualityOpen] = useState(false);
   const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -161,7 +161,7 @@ export function VideoPlayer({
   const readyRef = useRef(false);
   const startedRef = useRef(false);
   const wantPlayRef = useRef(false);
-  const qualityRef = useRef<QualityMode>("auto");
+  const qualityRef = useRef<QualityMode>("original");
   const qualityOpenRef = useRef(false);
   const savedPositionRef = useRef(0);
   const restoredRef = useRef(false);
@@ -245,16 +245,16 @@ export function VideoPlayer({
     const maxTier = detectedTier || 2160;
     const opts: QualityOption[] = [
       {
-        id: "auto",
-        label: "Auto",
-        tag: detectedTier ? tierBadge(detectedTier) : undefined,
-        hint: "Best quality, auto-recovers",
-      },
-      {
         id: "original",
         label: "Original",
         tag: detectedTier ? tierBadge(detectedTier) : undefined,
         hint: "Untouched source stream",
+      },
+      {
+        id: "auto",
+        label: "Auto",
+        tag: detectedTier ? tierBadge(detectedTier) : undefined,
+        hint: "Auto-steps down on freeze",
       },
     ];
     if (maxTier >= 2160) {
@@ -424,10 +424,10 @@ export function VideoPlayer({
     probePromiseRef.current = null;
     startedRef.current = false;
     wantPlayRef.current = false;
-    qualityRef.current = "auto";
+    qualityRef.current = "original";
     restoredRef.current = false;
     targetTimeRef.current = 0;
-    setQuality("auto");
+    setQuality("original");
     setQualityOpen(false);
     setSourceDims(null);
     setActiveCues([]);
