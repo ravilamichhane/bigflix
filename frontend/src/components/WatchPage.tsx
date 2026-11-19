@@ -15,7 +15,7 @@ interface WatchPageProps {
 }
 
 export function WatchPage({ hash, navigate }: WatchPageProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const playerWrapRef = useRef<HTMLDivElement | null>(null);
   const subtitleBtnRef = useRef<VjsButton | null>(null);
 
   const [latest, setLatest] = useState<DownloadStatus | null>(null);
@@ -145,8 +145,17 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
 
   // Initialize Video.js + MSE streaming once on mount for this hash.
   useEffect(() => {
-    const videoEl = videoRef.current;
-    if (!videoEl) return;
+    const wrap = playerWrapRef.current;
+    if (!wrap) return;
+    wrap.replaceChildren();
+    const videoEl = document.createElement("video");
+    videoEl.className = "video-js vjs-big-play-centered";
+    videoEl.id = "player";
+    videoEl.controls = true;
+    videoEl.playsInline = true;
+    videoEl.preload = "none";
+    videoEl.setAttribute("aria-label", "Movie player");
+    wrap.append(videoEl);
 
     probePromiseRef.current = null;
     startedRef.current = false;
@@ -304,6 +313,7 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
         streamFrom = Number(response.headers.get("X-Stream-Start")) || 0;
         buffer.timestampOffset = streamFrom;
         const reader = response.body.getReader();
+        let appended = 0;
         for (;;) {
           while (id === session && !disposed) {
             const range = rangeAt(video.currentTime);
@@ -321,7 +331,19 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
             return;
           }
           if (done) break;
-          if (value && !(await append(value, id))) return;
+          if (value) {
+            if (!(await append(value, id))) return;
+            appended += value.byteLength;
+            if (
+              remux === "copy" &&
+              appended >= 8 << 20 &&
+              (!buffer.buffered.length || video.readyState < 2)
+            ) {
+              reader.cancel().catch(() => {});
+              useCompat();
+              return;
+            }
+          }
         }
         await idle();
         if (id !== session || disposed || !info || !mediaSource) return;
@@ -475,6 +497,7 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
         });
     });
 
+    let seekTimer: number | undefined;
     const onSeeking = () => {
       setPlayerStateText("Seeking… prioritizing the new playback position.");
       if (!remux || !buffer || !MS) return;
@@ -482,7 +505,10 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
       if (rangeAt(t)) return;
       const head = rangeAt(video.currentTime) || rangeAt(streamFrom) || [streamFrom, bufferedEnd()];
       if (streaming && t >= head[0] - 0.5 && t <= head[1] + 5) return;
-      void stream(t);
+      if (seekTimer !== undefined) window.clearTimeout(seekTimer);
+      seekTimer = window.setTimeout(() => {
+        if (!disposed) void stream(video.currentTime);
+      }, 120);
     };
 
     const onLoadedMeta = () => {
@@ -611,6 +637,7 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
     return () => {
       disposed = true;
       session++;
+      if (seekTimer !== undefined) window.clearTimeout(seekTimer);
       abort?.abort();
       saveProgress();
       video.removeEventListener("seeking", onSeeking);
@@ -629,6 +656,7 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
       } catch {
         // Ignore cleanup errors.
       }
+      wrap.replaceChildren();
     };
   }, [hash]);
 
@@ -704,15 +732,7 @@ export function WatchPage({ hash, navigate }: WatchPageProps) {
           </p>
 
           <div className="player-wrap">
-            <video
-              ref={videoRef}
-              className="video-js vjs-big-play-centered"
-              id="player"
-              controls
-              playsInline
-              preload="none"
-              aria-label="Movie player"
-            />
+            <div ref={playerWrapRef} />
             {overlayHost &&
               createPortal(
                 <>
