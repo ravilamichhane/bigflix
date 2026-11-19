@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,11 +43,21 @@ type mediaProbe struct {
 	Subtitles []embeddedSubtitle `json:"subtitles,omitempty"`
 }
 
+type activeStream struct {
+	id     uint64
+	cancel context.CancelFunc
+}
+
 var (
-	probeMu    sync.Mutex
-	probeCache = map[string]mediaProbe{}
-	encoderOne sync.Once
-	h264Enc    = "libx264"
+	probeMu          sync.Mutex
+	probeCache       = map[string]mediaProbe{}
+	remuxMu          sync.Mutex
+	activeRemux      = map[string]activeStream{}
+	remuxSeq         uint64
+	encoderOne       sync.Once
+	h264Enc          = "libx264"
+	vaapiDevice      = ""
+	hasReadrateBurst = false
 )
 
 var (
@@ -60,7 +72,8 @@ func (a *App) remuxRoutes(mux *http.ServeMux) {
 }
 
 func clearProbeCache(hash string) {
-	prefix := strings.ToLower(hash) + "/"
+	key := strings.ToLower(hash)
+	prefix := key + "/"
 	probeMu.Lock()
 	for k := range probeCache {
 		if strings.HasPrefix(k, prefix) {
@@ -68,6 +81,12 @@ func clearProbeCache(hash string) {
 		}
 	}
 	probeMu.Unlock()
+	remuxMu.Lock()
+	if prev, ok := activeRemux[key]; ok {
+		prev.cancel()
+		delete(activeRemux, key)
+	}
+	remuxMu.Unlock()
 }
 
 // selfURL points ffmpeg back at the byte-range media route on the address the
@@ -403,6 +422,58 @@ func scaledHeight(srcW, srcH, maxH int) int {
 	return h
 }
 
+func detectEncoders() {
+	encoderOne.Do(func() {
+		out, _ := exec.Command(downloads.FFmpeg, "-hide_banner", "-encoders").Output()
+		encs := string(out)
+		switch {
+		case strings.Contains(encs, "h264_videotoolbox"):
+			h264Enc = "h264_videotoolbox"
+		case strings.Contains(encs, "h264_nvenc") && deviceReadable("/dev/nvidia0"):
+			h264Enc = "h264_nvenc"
+		case strings.Contains(encs, "h264_vaapi") && deviceReadable("/dev/dri/renderD128"):
+			h264Enc = "h264_vaapi"
+			vaapiDevice = "/dev/dri/renderD128"
+		}
+		help, _ := exec.Command(downloads.FFmpeg, "-hide_banner", "-h", "long").Output()
+		hasReadrateBurst = strings.Contains(string(help), "readrate_initial_burst")
+	})
+}
+
+func deviceReadable(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+func ffmpegThreads() int {
+	if raw := strings.TrimSpace(os.Getenv("FFMPEG_THREADS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 32 {
+			return n
+		}
+	}
+	n := runtime.NumCPU() / 2
+	if n < 1 {
+		return 1
+	}
+	if n > 4 {
+		return 4
+	}
+	return n
+}
+
+func ffmpegPreset() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FFMPEG_PRESET"))) {
+	case "ultrafast", "superfast", "veryfast", "faster", "fast":
+		return strings.ToLower(strings.TrimSpace(os.Getenv("FFMPEG_PRESET")))
+	default:
+		return "ultrafast"
+	}
+}
+
 func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	s, src, err := a.remuxSourceCtx(r.Context(), r.PathValue("hash"))
 	if err != nil {
@@ -416,6 +487,27 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// Cancel any stale FFmpeg stream for this download immediately (prevents
+	// stacked encoders burning CPU behind reverse proxies on seek/quality switches).
+	rctx, cancel := context.WithCancel(r.Context())
+	remuxMu.Lock()
+	remuxSeq++
+	myID := remuxSeq
+	if prev, ok := activeRemux[s.Hash]; ok {
+		prev.cancel()
+	}
+	activeRemux[s.Hash] = activeStream{id: myID, cancel: cancel}
+	remuxMu.Unlock()
+	defer func() {
+		cancel()
+		remuxMu.Lock()
+		if cur, ok := activeRemux[s.Hash]; ok && cur.id == myID {
+			delete(activeRemux, s.Hash)
+		}
+		remuxMu.Unlock()
+	}()
+
 	start, _ := strconv.ParseFloat(r.URL.Query().Get("t"), 64)
 	start = max(0, start)
 	compat := r.URL.Query().Get("mode") == "compat"
@@ -438,20 +530,28 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	// In copy mode the MP4 muxer rebases output timestamps to zero, so seek to
 	// an exact keyframe and tell the client where the stream begins.
 	if start > 0 && !compat {
-		start = keyframeBefore(r.Context(), src, start)
+		start = keyframeBefore(rctx, src, start)
 	}
-	encoderOne.Do(func() {
-		out, _ := exec.Command(downloads.FFmpeg, "-hide_banner", "-encoders").Output()
-		if strings.Contains(string(out), "h264_videotoolbox") {
-			h264Enc = "h264_videotoolbox"
-		}
-	})
-	// On macOS, decode and encode on the media engine so a 4K HEVC 10-bit
-	// conversion runs faster than real time without loading the CPU.
-	hardware := compat && h264Enc == "h264_videotoolbox" && p.Height > 0 && (p.Video == "hevc" || p.Video == "h264")
+	detectEncoders()
+
+	vtHardware := compat && h264Enc == "h264_videotoolbox" && p.Height > 0 && (p.Video == "hevc" || p.Video == "h264")
+	vaapiHardware := compat && h264Enc == "h264_vaapi" && vaapiDevice != ""
+	nvencHardware := compat && h264Enc == "h264_nvenc"
+	swCompat := compat && !vtHardware && !vaapiHardware && !nvencHardware
+	threads := ffmpegThreads()
+
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
-	if hardware {
+	if vtHardware {
 		args = append(args, "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld")
+	} else if vaapiHardware {
+		args = append(args, "-vaapi_device", vaapiDevice)
+	} else if swCompat {
+		args = append(args, "-threads", strconv.Itoa(threads))
+		if hasReadrateBurst {
+			// Burst 8s immediately for instant start/seek, then pace smoothly at 2x
+			// so software transcoding doesn't peg CPU at 100% or over-buffer behind proxies.
+			args = append(args, "-readrate", "2.0", "-readrate_initial_burst", "8")
+		}
 	}
 	args = append(args, "-rw_timeout", "60000000",
 		"-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "10")
@@ -464,15 +564,6 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	args = append(args, "-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-map_chapters", "-1")
 	if compat {
 		outH := scaledHeight(p.Width, p.Height, maxH)
-		var filter string
-		if hardware {
-			filter = fmt.Sprintf("scale_vt=w=-2:h=%d", outH)
-		} else if outH > 0 && (p.Height == 0 || outH < p.Height) {
-			filter = fmt.Sprintf("scale=-2:%d,format=yuv420p", outH)
-		} else {
-			filter = "format=yuv420p"
-		}
-		args = append(args, "-vf", filter, "-c:v", h264Enc)
 		rate, maxRate, bufSize := "6M", "8M", "12M"
 		switch {
 		case outH > 0 && outH <= 480:
@@ -484,25 +575,63 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 		case outH > 1080:
 			rate, maxRate, bufSize = "10M", "14M", "20M"
 		}
-		if h264Enc == "h264_videotoolbox" {
-			args = append(args, "-b:v", rate, "-maxrate", maxRate, "-bufsize", bufSize,
-				"-prio_speed", "1", "-profile:v", "high")
-		} else {
-			args = append(args, "-preset", "veryfast", "-crf", "22",
-				"-maxrate", maxRate, "-bufsize", bufSize, "-pix_fmt", "yuv420p")
+
+		switch {
+		case vtHardware:
+			args = append(args,
+				"-vf", fmt.Sprintf("scale_vt=w=-2:h=%d", outH),
+				"-c:v", "h264_videotoolbox",
+				"-b:v", rate, "-maxrate", maxRate, "-bufsize", bufSize,
+				"-prio_speed", "1", "-profile:v", "high", "-g", "48",
+			)
+		case vaapiHardware:
+			vf := "format=nv12,hwupload"
+			if outH > 0 && (p.Height == 0 || outH < p.Height) {
+				vf = fmt.Sprintf("format=nv12,hwupload,scale_vaapi=w=-2:h=%d", outH)
+			}
+			args = append(args,
+				"-vf", vf,
+				"-c:v", "h264_vaapi",
+				"-b:v", rate, "-maxrate", maxRate, "-bufsize", bufSize, "-g", "60",
+			)
+		case nvencHardware:
+			vf := "format=yuv420p"
+			if outH > 0 && (p.Height == 0 || outH < p.Height) {
+				vf = fmt.Sprintf("scale=-2:%d:flags=fast_bilinear,format=yuv420p", outH)
+			}
+			args = append(args,
+				"-vf", vf,
+				"-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
+				"-b:v", rate, "-maxrate", maxRate, "-bufsize", bufSize, "-g", "60",
+			)
+		default:
+			vf := "format=yuv420p"
+			if outH > 0 && (p.Height == 0 || outH < p.Height) {
+				vf = fmt.Sprintf("scale=-2:%d:flags=fast_bilinear,format=yuv420p", outH)
+			}
+			args = append(args,
+				"-vf", vf,
+				"-c:v", "libx264", "-preset", ffmpegPreset(), "-tune", "zerolatency",
+				"-crf", "24", "-maxrate", maxRate, "-bufsize", bufSize,
+				"-pix_fmt", "yuv420p", "-g", "60", "-threads", strconv.Itoa(threads),
+			)
 		}
-		args = append(args, "-g", "48")
 	} else {
 		args = append(args, "-c:v", "copy")
 		if p.Video == "hevc" {
 			args = append(args, "-tag:v", "hvc1")
 		}
 	}
-	args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k",
+	if p.Audio == "aac" {
+		args = append(args, "-c:a", "copy")
+	} else {
+		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
+	}
+	args = append(args,
 		"-avoid_negative_ts", "make_zero",
 		"-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "pipe:1")
 
-	cmd := exec.CommandContext(r.Context(), downloads.FFmpeg, args...)
+	cmd := exec.CommandContext(rctx, downloads.FFmpeg, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, "Unable to start remux", 500)
@@ -515,7 +644,7 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() {
-		if err := cmd.Wait(); err != nil && r.Context().Err() == nil {
+		if err := cmd.Wait(); err != nil && rctx.Err() == nil {
 			slog.Warn("remux ended", "hash", s.Hash, "error", err, "stderr", stderr.String())
 		}
 	}()

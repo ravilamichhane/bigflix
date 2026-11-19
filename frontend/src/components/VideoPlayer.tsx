@@ -449,10 +449,13 @@ export function VideoPlayer({
       }"`;
 
     function bufferLimits(): { aheadLimit: number; keepBehind: number } {
+      if (eng.remux === "compat") {
+        // Keep a leaner 14s ahead buffer when transcoding so the server doesn't
+        // burn CPU encoding 30s bursts on every seek or resolution switch.
+        return { aheadLimit: 14, keepBehind: 8 };
+      }
       const isHighRes =
-        (eng.remux === "copy" &&
-          ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920)) ||
-        (eng.remux === "compat" && eng.compatMaxH >= 1440);
+        (eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920;
       return isHighRes
         ? { aheadLimit: 18, keepBehind: 8 }
         : { aheadLimit: 30, keepBehind: 15 };
