@@ -142,30 +142,80 @@ export interface CueToken {
   underline?: boolean;
 }
 
-// Safely parses VTT inline formatting (<i>, <b>, <u>) into plain text tokens
-// while stripping unknown tags (like <c.color> or {\an8}).
-export function parseCueLines(raw: string): CueToken[][] {
-  const cleaned = raw.replace(/\{\\[^}]*\}/g, "").replace(/\r\n/g, "\n");
-  return cleaned.split("\n").map((line) => {
-    const tokens: CueToken[] = [];
-    let italic = false;
-    let bold = false;
-    let underline = false;
-    const parts = line.split(/(<\/?[a-zA-Z][^>]*>)/g);
-    for (const part of parts) {
-      if (!part) continue;
-      if (part.startsWith("<") && part.endsWith(">")) {
-        const tag = part.slice(1, -1).trim().toLowerCase();
-        if (tag === "i") italic = true;
-        else if (tag === "/i") italic = false;
-        else if (tag === "b") bold = true;
-        else if (tag === "/b") bold = false;
-        else if (tag === "u") underline = true;
-        else if (tag === "/u") underline = false;
-      } else {
-        tokens.push({ text: part, italic, bold, underline });
-      }
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  ndash: "–",
+  mdash: "—",
+  hellip: "…",
+  lsquo: "‘",
+  rsquo: "’",
+  ldquo: "“",
+  rdquo: "”",
+  copy: "©",
+  lrm: "",
+  rlm: "",
+};
+
+function decodeEntitiesOnce(s: string): string {
+  return s.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (match, code: string) => {
+    if (code.startsWith("#x") || code.startsWith("#X")) {
+      const cp = parseInt(code.slice(2), 16);
+      return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : match;
     }
-    return tokens;
+    if (code.startsWith("#")) {
+      const cp = parseInt(code.slice(1), 10);
+      return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : match;
+    }
+    const named = NAMED_ENTITIES[code.toLowerCase()];
+    return named !== undefined ? named : match;
   });
+}
+
+function decodeHtmlEntities(s: string): string {
+  const first = decodeEntitiesOnce(s);
+  return first.includes("&") ? decodeEntitiesOnce(first) : first;
+}
+
+// Decodes escaped HTML entities (like &#39;, &#34;, &lt;i&gt;), converts inline
+// formatting (<i>, <b>, <u>) into safe tokens, and strips stray subtitle tags.
+export function parseCueLines(raw: string): CueToken[][] {
+  const decoded = decodeHtmlEntities(raw)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/\{\\[^}]*\}/g, "")
+    .replace(/<\d{1,2}:\d{2}:\d{2}\.\d{3}>/g, "");
+
+  let italic = false;
+  let bold = false;
+  let underline = false;
+
+  return decoded
+    .split("\n")
+    .map((line) => {
+      const tokens: CueToken[] = [];
+      const parts = line.split(/(<\/?[a-zA-Z][^>]*>)/g);
+      for (const part of parts) {
+        if (!part) continue;
+        if (part.startsWith("<") && part.endsWith(">")) {
+          const name = part.slice(1, -1).trim().split(/[\s.]/)[0].toLowerCase();
+          if (name === "i") italic = true;
+          else if (name === "/i") italic = false;
+          else if (name === "b") bold = true;
+          else if (name === "/b") bold = false;
+          else if (name === "u") underline = true;
+          else if (name === "/u") underline = false;
+          // Strip other tags (<font>, <c>, <v>, <lang>, etc.)
+        } else {
+          tokens.push({ text: part, italic, bold, underline });
+        }
+      }
+      return tokens;
+    })
+    .filter((tokens) => tokens.some((t) => t.text.trim() !== ""));
 }
