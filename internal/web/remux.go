@@ -163,6 +163,22 @@ func codecString(codec, profile string, level int) string {
 	return codec
 }
 
+func scaledHeight(srcW, srcH, maxH int) int {
+	if maxH <= 0 {
+		return srcH
+	}
+	if srcW <= 0 || srcH <= 0 {
+		return maxH
+	}
+	maxW := maxH * 16 / 9
+	scale := min(1.0, min(float64(maxW)/float64(srcW), float64(maxH)/float64(srcH)))
+	h := int(float64(srcH)*scale+0.5) &^ 1
+	if h < 2 {
+		return 2
+	}
+	return h
+}
+
 func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	s, src, err := a.remuxSourceCtx(r.Context(), r.PathValue("hash"))
 	if err != nil {
@@ -179,9 +195,21 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	start, _ := strconv.ParseFloat(r.URL.Query().Get("t"), 64)
 	start = max(0, start)
 	compat := r.URL.Query().Get("mode") == "compat"
+	maxH, _ := strconv.Atoi(r.URL.Query().Get("maxh"))
+	switch maxH {
+	case 720, 1080, 2160:
+	default:
+		maxH = 0
+	}
 	probeMu.Lock()
 	p := probeCache[fmt.Sprintf("%s/%d", s.Hash, s.FileIndex)]
 	probeMu.Unlock()
+
+	// Default compat transcode to <=1080p when source is >1080p so high-res
+	// fallback runs faster than real time and stays within browser MSE quotas.
+	if compat && maxH == 0 && (p.Height > 1080 || p.Width > 1920) {
+		maxH = 1080
+	}
 
 	// In copy mode the MP4 muxer rebases output timestamps to zero, so seek to
 	// an exact keyframe and tell the client where the stream begins.
@@ -211,20 +239,28 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, "-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-map_chapters", "-1")
 	if compat {
-		// Keep the source resolution; only the codec changes.
-		filter := "format=yuv420p"
+		outH := scaledHeight(p.Width, p.Height, maxH)
+		var filter string
 		if hardware {
-			filter = fmt.Sprintf("scale_vt=w=-2:h=%d", p.Height)
+			filter = fmt.Sprintf("scale_vt=w=-2:h=%d", outH)
+		} else if outH > 0 && (p.Height == 0 || outH < p.Height) {
+			filter = fmt.Sprintf("scale=-2:%d,format=yuv420p", outH)
+		} else {
+			filter = "format=yuv420p"
 		}
 		args = append(args, "-vf", filter, "-c:v", h264Enc)
+		rate, maxRate, bufSize := "6M", "8M", "12M"
+		if outH > 0 && outH <= 720 {
+			rate, maxRate, bufSize = "3500k", "5M", "8M"
+		} else if outH > 1080 {
+			rate, maxRate, bufSize = "10M", "14M", "20M"
+		}
 		if h264Enc == "h264_videotoolbox" {
-			rate := "8M"
-			if p.Height > 1440 {
-				rate = "12M"
-			}
-			args = append(args, "-b:v", rate, "-prio_speed", "1", "-profile:v", "high")
+			args = append(args, "-b:v", rate, "-maxrate", maxRate, "-bufsize", bufSize,
+				"-prio_speed", "1", "-profile:v", "high")
 		} else {
-			args = append(args, "-preset", "veryfast", "-crf", "21")
+			args = append(args, "-preset", "veryfast", "-crf", "22",
+				"-maxrate", maxRate, "-bufsize", bufSize, "-pix_fmt", "yuv420p")
 		}
 		args = append(args, "-g", "48")
 	} else {

@@ -110,7 +110,8 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  max-width: 65%;
+  min-width: 0;
+  flex: 0 1 auto;
   padding: 4px 10px;
   border-radius: var(--r-full);
   background: rgba(12, 11, 10, 0.62);

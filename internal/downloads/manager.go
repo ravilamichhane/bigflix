@@ -37,6 +37,19 @@ const (
 	backgroundWindow       = 8 << 20
 )
 
+// streamWindow scales piece readahead and header/tail edge priority with file
+// size so high-bitrate 4K/1080p streams keep enough verified data queued ahead.
+func streamWindow(size int64) (ahead, bg, edge int64) {
+	switch {
+	case size >= 2<<30:
+		return 24 << 20, 24 << 20, 4 << 20
+	case size >= 500<<20:
+		return 16 << 20, 16 << 20, 2 << 20
+	default:
+		return readAhead, backgroundWindow, 1 << 20
+	}
+}
+
 type Record struct {
 	Hash      string    `json:"hash"`
 	Title     string    `json:"title"`
@@ -603,13 +616,14 @@ func (m *Manager) schedule(j *job) {
 	if first >= 0 {
 		// Keep enough work queued to use several fast peers while preserving
 		// sequential playback. Reader priorities still outrank this window.
-		window := max(1, int(backgroundWindow/pl))
+		_, bgWin, edgeBytes := streamWindow(j.file.Length())
+		window := max(1, int(bgWin/pl))
 		for p := first; p < min(end, first+window); p++ {
 			if !j.t.PieceState(p).Complete {
 				next[p] = torrent.PiecePriorityNormal
 			}
 		} // Beginning and tail accelerate container probing; actual seek readers outrank these.
-		edge := max(1, int((1<<20)/pl))
+		edge := max(1, int(edgeBytes/pl))
 		for p := start; p < min(end, start+edge); p++ {
 			if !j.t.PieceState(p).Complete {
 				next[p] = torrent.PiecePriorityHigh
@@ -652,7 +666,8 @@ func (m *Manager) Reader(ctx context.Context, hash string) (torrent.Reader, Vide
 	ctx, cancel := context.WithCancel(ctx)
 	reader := j.file.NewReader()
 	reader.SetContext(ctx)
-	reader.SetReadahead(readAhead)
+	ahead, _, _ := streamWindow(j.file.Length())
+	reader.SetReadahead(ahead)
 	m.nextReader++
 	id := m.nextReader
 	j.readers[id] = cancel

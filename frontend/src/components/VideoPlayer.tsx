@@ -34,7 +34,16 @@ interface VideoPlayerProps {
   onCodecNoteChange?: (note: string) => void;
 }
 
+type QualityMode = "auto" | "1080" | "720";
+
 const RATES = [0.75, 1, 1.25, 1.5, 2];
+const QUALITIES: QualityMode[] = ["auto", "1080", "720"];
+
+function qualityLabel(q: QualityMode): string {
+  if (q === "1080") return "1080p";
+  if (q === "720") return "720p";
+  return "Auto";
+}
 
 function formatClock(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return "0:00";
@@ -78,6 +87,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
+  const [quality, setQuality] = useState<QualityMode>("auto");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [subOpenSignal, setSubOpenSignal] = useState(0);
@@ -94,6 +104,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
   const readyRef = useRef(false);
   const startedRef = useRef(false);
   const wantPlayRef = useRef(false);
+  const qualityRef = useRef<QualityMode>("auto");
   const savedPositionRef = useRef(0);
   const restoredRef = useRef(false);
   const targetTimeRef = useRef(0);
@@ -109,6 +120,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
   const engineRef = useRef({
     remux: null as "copy" | "compat" | null,
+    compatMaxH: 0,
     info: null as ProbeMediaResponse | null,
     mediaSource: null as MediaSource | null,
     objectUrl: "",
@@ -228,7 +240,9 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     return probePromiseRef.current;
   }, [hash]);
 
-  const startPlaybackRef = useRef<(fromOverride?: number) => Promise<void>>(async () => {});
+  const startPlaybackRef = useRef<
+    (fromOverride?: number, qualityOverride?: QualityMode) => Promise<void>
+  >(async () => {});
 
   useEffect(() => {
     const rawVideo = videoRef.current;
@@ -239,6 +253,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const eng = engineRef.current;
     eng.disposed = false;
     eng.remux = null;
+    eng.compatMaxH = 0;
     eng.info = null;
     eng.mediaSource = null;
     eng.buffer = null;
@@ -251,8 +266,10 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     probePromiseRef.current = null;
     startedRef.current = false;
     wantPlayRef.current = false;
+    qualityRef.current = "auto";
     restoredRef.current = false;
     targetTimeRef.current = 0;
+    setQuality("auto");
     setStarted(false);
     setPlaying(false);
     setBuffering(false);
@@ -269,6 +286,17 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       `video/mp4; codecs="${mode === "copy" ? eng.info?.codecs || "" : "avc1.640033"}${
         eng.info?.audio ? ", mp4a.40.2" : ""
       }"`;
+
+    // Adaptive MSE buffer limits: 4K / high-res streams use much smaller time windows
+    // so they stay well under browser SourceBuffer memory quotas (~80-150 MB).
+    function bufferLimits(): { aheadLimit: number; keepBehind: number } {
+      const highRes =
+        eng.remux === "copy" &&
+        ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920);
+      return highRes
+        ? { aheadLimit: 18, keepBehind: 8 }
+        : { aheadLimit: 30, keepBehind: 15 };
+    }
 
     const idle = () =>
       new Promise<void>((resolve) => {
@@ -311,9 +339,10 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       setBufferedEndTime(ranges.end(ranges.length - 1));
     }
 
-    async function evict(keepBehind = 25) {
+    async function evict(keepBehind?: number) {
       if (!eng.buffer || !eng.mediaSource || eng.mediaSource.readyState !== "open") return;
-      const keep = video.currentTime - keepBehind;
+      const behind = keepBehind ?? bufferLimits().keepBehind;
+      const keep = video.currentTime - behind;
       if (eng.buffer.buffered.length && eng.buffer.buffered.start(0) < keep) {
         await idle();
         if (eng.disposed || !eng.buffer || eng.mediaSource.readyState !== "open") return;
@@ -327,8 +356,19 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       }
     }
 
+    // Patient appendBytes: proactively evicts old data, and on QuotaExceededError
+    // NEVER kills the stream — instead frees space or waits for playback to consume
+    // buffered data so high-res 4K streams never silently freeze.
     async function appendBytes(data: Uint8Array<ArrayBuffer>, id: number): Promise<boolean> {
-      for (let attempt = 0; attempt < 4; attempt++) {
+      const { keepBehind } = bufferLimits();
+      if (
+        eng.buffer?.buffered.length &&
+        video.currentTime - eng.buffer.buffered.start(0) > keepBehind + 4
+      ) {
+        await evict(keepBehind);
+      }
+
+      for (let attempt = 0; ; attempt++) {
         await idle();
         if (id !== eng.session || eng.disposed || !eng.buffer) return false;
         if (!eng.mediaSource || eng.mediaSource.readyState !== "open") return false;
@@ -341,11 +381,16 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
           if (!(error instanceof Error) || error.name !== "QuotaExceededError") {
             throw error;
           }
-          await evict(attempt === 0 ? 10 : 2);
-          await sleep(300);
+          // 1. Evict aggressively behind currentTime
+          await evict(attempt === 0 ? 4 : 1);
+          // 2. If buffer ahead is large and still full, wait while playback drains it
+          if (attempt >= 2) {
+            await sleep(500);
+          } else {
+            await sleep(150);
+          }
         }
       }
-      return false;
     }
 
     function revokeCurrentUrl() {
@@ -355,17 +400,42 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       }
     }
 
-    function useCompat() {
+    function useCompat(maxH = 1080, reason?: string) {
       if (!eng.info || eng.disposed) return;
       eng.remux = "compat";
+      eng.compatMaxH = maxH;
+      const capped = maxH > 0 && (eng.info.height > maxH || eng.info.width > (maxH * 16) / 9);
+      const resText = capped ? `≤${maxH}p` : `${eng.info.width}×${eng.info.height}`;
       onCodecNoteChange?.(
-        `Converting ${eng.info.video.toUpperCase()} to H.264 (${eng.info.width}×${eng.info.height}).`,
+        reason || `Smooth H.264 playback (${resText}) for stable browser decoding.`,
       );
+      setStatusText(`Switching to smooth ${capped ? `${maxH}p` : "H.264"}…`);
+      setBuffering(true);
       restoredRef.current = false;
       const pos = video.currentTime || savedPositionRef.current;
       savedPositionRef.current = pos;
       openRemux(pos);
       if (wantPlayRef.current) void attemptPlay();
+    }
+
+    async function switchDirectToCompat(maxH: number, reason: string) {
+      if (eng.disposed || !MS) return;
+      const pos = video.currentTime || savedPositionRef.current;
+      savedPositionRef.current = pos;
+      setBuffering(true);
+      setStatusText(`Switching to smooth ${maxH}p…`);
+      try {
+        eng.info = await probe();
+      } catch {
+        // Fallback: reload direct stream if probe unavailable (e.g. no ffmpeg).
+        restoredRef.current = false;
+        video.src = mediaUrl(`/media/${hash}`);
+        video.load();
+        if (wantPlayRef.current) void attemptPlay();
+        return;
+      }
+      if (eng.disposed || !eng.info) return;
+      useCompat(maxH, reason);
     }
 
     async function stream(from: number, resume = false) {
@@ -388,8 +458,10 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
             // Ignore abort if buffer already closed.
           }
         }
+        const maxhParam =
+          eng.remux === "compat" && eng.compatMaxH > 0 ? `&maxh=${eng.compatMaxH}` : "";
         const response = await fetch(
-          mediaUrl(`/media/${hash}/remux?mode=${eng.remux}&t=${from.toFixed(3)}`),
+          mediaUrl(`/media/${hash}/remux?mode=${eng.remux}&t=${from.toFixed(3)}${maxhParam}`),
           { signal: eng.abort.signal },
         );
         if (!response.ok || !response.body) {
@@ -448,15 +520,16 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         };
 
         for (;;) {
+          const { aheadLimit } = bufferLimits();
           while (id === eng.session && !eng.disposed) {
             const range = rangeAt(video.currentTime);
-            if (!range || range[1] - video.currentTime < 45) break;
+            if (!range || range[1] - video.currentTime < aheadLimit) break;
             if (!(await flushPending())) {
               reader.cancel().catch(() => {});
               return;
             }
             await evict();
-            await sleep(500);
+            await sleep(450);
           }
 
           if (id !== eng.session || eng.disposed) {
@@ -480,6 +553,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
             const range = rangeAt(video.currentTime);
             const ahead = range ? range[1] - video.currentTime : 0;
+            // Flush immediately on startup/seek (<3s ahead); coalesce to 512KB once playing.
             const threshold = ahead < 3 ? 0 : 512 * 1024;
 
             if (pendingBytes >= threshold) {
@@ -495,7 +569,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
               (!eng.buffer?.buffered.length || video.readyState < 2)
             ) {
               reader.cancel().catch(() => {});
-              useCompat();
+              useCompat(1080);
               return;
             }
           }
@@ -525,7 +599,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
           return;
         }
         if (eng.remux === "copy" && (!eng.buffer || !eng.buffer.buffered.length)) {
-          useCompat();
+          useCompat(1080);
           return;
         }
         setStatusText("Reconnecting…");
@@ -564,7 +638,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
             }
             void stream(from);
           } catch {
-            if (eng.remux === "copy") useCompat();
+            if (eng.remux === "copy") useCompat(1080);
           }
         },
         { once: true },
@@ -574,9 +648,13 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       video.load();
     }
 
-    async function startPlayback(fromOverride?: number) {
+    async function startPlayback(fromOverride?: number, qualityOverride?: QualityMode) {
       const current = latestRef.current;
       if (!readyRef.current || !current || eng.disposed) return;
+
+      const activeQuality = qualityOverride ?? qualityRef.current;
+      const forceCompatMaxH =
+        activeQuality === "1080" ? 1080 : activeQuality === "720" ? 720 : 0;
 
       wantPlayRef.current = true;
       startedRef.current = true;
@@ -591,11 +669,14 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         savedPositionRef.current = fromOverride;
       }
 
-      if (current.direct) {
+      // Direct playback when container is browser-native AND user hasn't requested a downscaled smooth tier
+      if (current.direct && forceCompatMaxH === 0) {
         eng.remux = null;
+        eng.compatMaxH = 0;
         eng.session++;
         eng.abort?.abort();
         revokeCurrentUrl();
+        onCodecNoteChange?.("Direct browser playback.");
         setStatusText("Buffering…");
         video.src = mediaUrl(`/media/${hash}`);
         video.load();
@@ -608,6 +689,15 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         eng.info = await probe();
       } catch (error) {
         if (eng.disposed) return;
+        // If direct playback is possible and probe failed (e.g. no ffmpeg), fall back to direct
+        if (current.direct) {
+          eng.remux = null;
+          eng.compatMaxH = 0;
+          video.src = mediaUrl(`/media/${hash}`);
+          video.load();
+          await attemptPlay();
+          return;
+        }
         startedRef.current = false;
         wantPlayRef.current = false;
         setStarted(false);
@@ -622,21 +712,27 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       const label = `${eng.info.video.toUpperCase()} ${eng.info.width}×${eng.info.height}`;
       if (!MS) {
         eng.remux = "compat";
+        eng.compatMaxH = forceCompatMaxH || 1080;
         restoredRef.current = true;
         onCodecNoteChange?.(`${label} · converted on the fly`);
-        video.src = mediaUrl(`/media/${hash}/remux?mode=compat`);
+        video.src = mediaUrl(`/media/${hash}/remux?mode=compat&maxh=${eng.compatMaxH}`);
         video.load();
         await attemptPlay();
         return;
       }
 
-      if (eng.remux !== "compat") {
+      if (forceCompatMaxH > 0) {
+        eng.remux = "compat";
+        eng.compatMaxH = forceCompatMaxH;
+      } else {
+        eng.compatMaxH = 1080;
         eng.remux = MS.isTypeSupported(mime("copy")) ? "copy" : "compat";
       }
+
       onCodecNoteChange?.(
         eng.remux === "copy"
           ? `${label} · original quality`
-          : `Converting ${eng.info.video.toUpperCase()} to H.264 (${eng.info.width}×${eng.info.height}).`,
+          : `Smooth H.264 playback (≤${eng.compatMaxH || 1080}p) from ${label}.`,
       );
       const from =
         savedPositionRef.current > 0 && savedPositionRef.current < eng.info.duration - 5
@@ -649,29 +745,143 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
 
     startPlaybackRef.current = startPlayback;
 
+    // Smart Freeze & Stall Watchdog:
+    // 1. Jumps small MSE gaps (<= 2.5s)
+    // 2. Detects silent high-res decoder freezes (currentTime stops advancing even when !paused)
+    // 3. Detects severe 4K frame drops and auto-switches to smooth 1080p H.264
+    // 4. Recovers wedged direct-stream HTTP byte-range stalls automatically
+    let lastObservedTime = -1;
+    let stalledSince = 0;
+    let stallRecoveries = 0;
+    let lastTotalFrames = 0;
+    let lastDroppedFrames = 0;
+    let dropCheckAt = Date.now();
+
     const watchdog = window.setInterval(() => {
-      if (eng.disposed || !startedRef.current || !wantPlayRef.current || video.ended) return;
+      if (eng.disposed || !startedRef.current || !wantPlayRef.current || video.ended) {
+        stalledSince = 0;
+        return;
+      }
       if (scrubbingRef.current) return;
 
-      if (eng.buffer && eng.buffer.buffered.length > 0 && video.readyState < 3) {
-        const t = video.currentTime;
-        const inRange = rangeAt(t);
-        if (!inRange) {
-          for (let i = 0; i < eng.buffer.buffered.length; i++) {
-            const s = eng.buffer.buffered.start(i);
-            if (s > t && s - t <= 1.5) {
-              internalSeekRef.current = true;
-              video.currentTime = s + 0.02;
-              break;
+      const now = Date.now();
+      const t = video.currentTime;
+
+      // Check if video is actively advancing
+      if (!video.paused && lastObservedTime >= 0 && Math.abs(t - lastObservedTime) >= 0.05) {
+        lastObservedTime = t;
+        stalledSince = 0;
+        if (stallRecoveries > 0 && video.readyState >= 3) {
+          stallRecoveries = 0;
+        }
+
+        // Check severe frame-drop choking on high-res video (>1080p) every 4s
+        if (now - dropCheckAt >= 4000 && typeof video.getVideoPlaybackQuality === "function") {
+          const q = video.getVideoPlaybackQuality();
+          const dTotal = q.totalVideoFrames - lastTotalFrames;
+          const dDrop = q.droppedVideoFrames - lastDroppedFrames;
+          lastTotalFrames = q.totalVideoFrames;
+          lastDroppedFrames = q.droppedVideoFrames;
+          dropCheckAt = now;
+
+          const isHighResOriginal =
+            (eng.remux === "copy" &&
+              ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920)) ||
+            (!eng.remux && (video.videoHeight > 1080 || video.videoWidth > 1920));
+
+          if (isHighResOriginal && dTotal >= 45 && dDrop / dTotal > 0.45 && MS) {
+            if (eng.remux === "copy") {
+              useCompat(1080, "High resolution was dropping frames · switched to smooth 1080p.");
+            } else {
+              void switchDirectToCompat(
+                1080,
+                "High resolution was dropping frames · switched to smooth 1080p.",
+              );
             }
           }
         }
+        return;
       }
 
-      if (video.paused && video.readyState >= 3 && !video.error) {
-        void attemptPlay();
+      lastObservedTime = t;
+      if (!stalledSince) {
+        stalledSince = now;
+        return;
       }
-    }, 400);
+
+      const stalledMs = now - stalledSince;
+
+      // After 1.2s stalled: jump small MSE gaps or resume paused-but-ready video
+      if (stalledMs >= 1200) {
+        if (eng.buffer && eng.buffer.buffered.length > 0 && video.readyState < 3) {
+          const inRange = rangeAt(t);
+          if (!inRange) {
+            for (let i = 0; i < eng.buffer.buffered.length; i++) {
+              const s = eng.buffer.buffered.start(i);
+              if (s > t && s - t <= 2.5) {
+                internalSeekRef.current = true;
+                video.currentTime = s + 0.03;
+                stalledSince = now;
+                return;
+              }
+            }
+          }
+        }
+
+        if (video.paused && video.readyState >= 3 && !video.error) {
+          void attemptPlay();
+          return;
+        }
+      }
+
+      // After 4.5s truly frozen: actively recover!
+      if (stalledMs >= 4500) {
+        stalledSince = now;
+        stallRecoveries++;
+        setBuffering(true);
+
+        if (eng.remux === "copy") {
+          const hasDataHere = Boolean(rangeAt(t));
+          if (hasDataHere || stallRecoveries >= 2) {
+            // Decoder is stuck despite having buffered frames, or repeated stalls: switch to smooth H.264!
+            useCompat(
+              1080,
+              "High-resolution stream froze · switched to smooth 1080p H.264.",
+            );
+          } else {
+            setStatusText("Recovering stream…");
+            void stream(t);
+          }
+        } else if (eng.remux === "compat") {
+          if (
+            stallRecoveries >= 2 &&
+            eng.compatMaxH !== 720 &&
+            ((eng.info?.height ?? 0) > 1080 || (eng.info?.width ?? 0) > 1920)
+          ) {
+            useCompat(720, "Stepped down to 720p for smooth uninterrupted playback.");
+          } else {
+            setStatusText("Recovering stream…");
+            void stream(t);
+          }
+        } else {
+          // Direct MP4 mode freeze recovery
+          const isHighResDirect = video.videoHeight > 1080 || video.videoWidth > 1920;
+          if (stallRecoveries >= 2 && isHighResDirect && MS) {
+            void switchDirectToCompat(
+              1080,
+              "High-resolution direct playback froze · switched to smooth 1080p.",
+            );
+          } else {
+            setStatusText("Recovering playback…");
+            savedPositionRef.current = t;
+            restoredRef.current = false;
+            video.src = mediaUrl(`/media/${hash}`);
+            video.load();
+            void attemptPlay();
+          }
+        }
+      }
+    }, 500);
 
     const onLoadedMeta = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) {
@@ -737,6 +947,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         internalSeekRef.current = false;
         return;
       }
+      stalledSince = 0;
       setBuffering(true);
       setStatusText("Seeking…");
       if (!eng.remux || !eng.buffer || !MS) return;
@@ -782,12 +993,21 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     const onError = () => {
       if (eng.disposed) return;
       if (eng.remux === "copy" && MS && [3, 4].includes(video.error?.code || 0)) {
-        useCompat();
+        useCompat(1080);
         return;
       }
       if (!eng.remux && startedRef.current && eng.directRetries < 5) {
         eng.directRetries++;
         savedPositionRef.current = video.currentTime || savedPositionRef.current;
+        // On decode error (code 3) or unsupported source (code 4) in direct MP4,
+        // try smooth H.264 remux right away on second retry!
+        if (eng.directRetries >= 2 && [3, 4].includes(video.error?.code || 0) && MS) {
+          void switchDirectToCompat(
+            1080,
+            "Codec incompatible with direct play · switched to smooth 1080p.",
+          );
+          return;
+        }
         setBuffering(true);
         setStatusText(`Waiting for pieces · retry ${eng.directRetries}/5`);
         if (eng.retryTimer !== undefined) window.clearTimeout(eng.retryTimer);
@@ -808,7 +1028,7 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
       setBuffering(false);
       setFatalError(
         video.error?.code === 4
-          ? "Source unavailable or unsupported codec. Try retrying once more peers connect."
+          ? "Source unavailable or unsupported codec. Try switching to 1080p or retrying."
           : "Playback interrupted. Check peers and retry.",
       );
       showControls(true);
@@ -937,6 +1157,18 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
     setRate(next);
     showControls(false);
   }, [rate, showControls]);
+
+  const cycleQuality = useCallback(() => {
+    const idx = QUALITIES.indexOf(qualityRef.current);
+    const next = QUALITIES[(idx + 1) % QUALITIES.length];
+    qualityRef.current = next;
+    setQuality(next);
+    showControls(false);
+    if (startedRef.current) {
+      const pos = videoRef.current?.currentTime || savedPositionRef.current;
+      void startPlaybackRef.current(pos, next);
+    }
+  }, [showControls]);
 
   const handleRetry = useCallback(() => {
     const video = videoRef.current;
@@ -1128,6 +1360,15 @@ export function VideoPlayer({ hash, latest, onCodecNoteChange }: VideoPlayerProp
         </span>
 
         <div className="kp-top-actions">
+          <button
+            type="button"
+            className="kp-pill-btn mono"
+            aria-label={`Stream quality ${qualityLabel(quality)}`}
+            title="Switch stream quality (Auto / 1080p / 720p)"
+            onClick={cycleQuality}
+          >
+            {qualityLabel(quality)}
+          </button>
           <button
             type="button"
             className="kp-pill-btn"
