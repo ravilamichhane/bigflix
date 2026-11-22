@@ -43,25 +43,55 @@ const (
 // torrent (e.g. anime season packs) to (season, episode) pairs via local AI.
 type FileMapperFunc func(ctx context.Context, seriesTitle string, targetSeason int, files []VideoFile) ([]EpisodeFile, error)
 
-// streamWindow scales piece readahead and header/tail edge priority with file
-// size so high-bitrate 4K/1080p streams keep enough verified data queued ahead.
+// EpisodePick is the result of asking the local AI to verify/select the exact
+// video file inside a season pack for a specific TV episode.
+type EpisodePick struct {
+	Found     bool
+	FileIndex int
+	Reason    string
+}
+
+// FilePickerFunc asks the local AI to inspect a multi-file torrent's video
+// files and pick the exact file matching the target TV series episode.
+type FilePickerFunc func(ctx context.Context, seriesTitle string, season, episode int, episodeTitle string, files []VideoFile) (EpisodePick, error)
+
+// Public UDP/HTTP BitTorrent trackers merged into magnet specs when trackers
+// are enabled so downloads get immediate peer bursts instead of relying on DHT alone.
+var publicTrackers = [][]string{
+	{
+		"udp://tracker.opentrackr.org:1337/announce",
+		"udp://open.stealth.si:80/announce",
+		"udp://tracker.torrent.eu.org:451/announce",
+		"udp://exodus.desync.com:6969/announce",
+		"udp://tracker.openbittorrent.com:6969/announce",
+		"udp://explodie.org:6969/announce",
+		"udp://tracker.tiny-vps.com:6969/announce",
+		"udp://open.demonii.com:1337/announce",
+		"https://tracker.tamersunion.org:443/announce",
+	},
+}
+
+// streamWindow scales piece readahead, sliding download window, and header/tail
+// edge priority with file size so fast VPS peers saturate parallel pieces while
+// keeping playback-critical pieces at top priority.
 func streamWindow(size int64) (ahead, bg, edge int64) {
 	switch {
-	case size >= 2<<30:
-		return 24 << 20, 24 << 20, 4 << 20
-	case size >= 500<<20:
-		return 16 << 20, 16 << 20, 2 << 20
+	case size >= 1500<<20:
+		return 48 << 20, 96 << 20, 6 << 20
+	case size >= 200<<20:
+		return 32 << 20, 64 << 20, 4 << 20
 	default:
 		return readAhead, backgroundWindow, 1 << 20
 	}
 }
 
 type EpisodeFile struct {
-	FileIndex int    `json:"file_index"`
-	Season    int    `json:"season"`
-	Episode   int    `json:"episode"`
-	Name      string `json:"name"`
-	Size      int64  `json:"size"`
+	FileIndex  int    `json:"file_index"`
+	Season     int    `json:"season"`
+	Episode    int    `json:"episode"`
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	AIVerified bool   `json:"ai_verified,omitempty"`
 }
 
 type FallbackCandidate struct {
@@ -146,6 +176,8 @@ type job struct {
 	startedAt     time.Time
 	replacedAt    time.Time
 	aiMapped      bool
+	aiMapping     bool
+	aiCheckedFor  [2]int
 	record        Record
 	t             *torrent.Torrent
 	file          *torrent.File
@@ -173,11 +205,13 @@ type Manager struct {
 	reserve         uint64
 	closed          bool
 	listenPort      int
+	disableTrackers bool
 	bindings        []InterfaceBinding
 	networkClosers  []func()
 	networkErrors   []string
 	failoverTimeout time.Duration
 	fileMapper      FileMapperFunc
+	filePicker      FilePickerFunc
 }
 
 type Options struct {
@@ -232,8 +266,17 @@ func Open(db *database.Store, opts Options) (*Manager, error) {
 		cfg.DisableWebtorrent = true
 		cfg.DisableWebseeds = true
 		cfg.Seed = false
-		cfg.EstablishedConnsPerTorrent = 60
-		cfg.HalfOpenConnsPerTorrent = 30
+		cfg.EstablishedConnsPerTorrent = 120
+		cfg.HalfOpenConnsPerTorrent = 60
+		cfg.TotalHalfOpenConns = 120
+		cfg.TorrentPeersHighWater = 500
+		cfg.TorrentPeersLowWater = 80
+		cfg.NominalDialTimeout = 8 * time.Second
+		cfg.MinDialTimeout = 2 * time.Second
+		cfg.HandshakesTimeout = 4 * time.Second
+		cfg.DisableAcceptRateLimiting = true
+		cfg.MaxUnverifiedBytes = 128 << 20
+		cfg.PieceHashersPerTorrent = 3
 		if len(bindings) > 0 {
 			cfg.DisableTCP = true
 			cfg.DisableUTP = true
@@ -270,6 +313,7 @@ func Open(db *database.Store, opts Options) (*Manager, error) {
 		failoverTimeout: ft,
 	}
 	m.listenPort = cfg.ListenPort
+	m.disableTrackers = cfg.DisableTrackers
 	m.bindings = bindings
 	if len(bindings) > 0 {
 		m.openInterfaceSockets()
@@ -314,6 +358,12 @@ func Open(db *database.Store, opts Options) (*Manager, error) {
 func (m *Manager) SetFileMapper(fn FileMapperFunc) {
 	m.mu.Lock()
 	m.fileMapper = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) SetFilePicker(fn FilePickerFunc) {
+	m.mu.Lock()
+	m.filePicker = fn
 	m.mu.Unlock()
 }
 
@@ -423,11 +473,13 @@ func (m *Manager) addLocked(r Record, spec *torrent.TorrentSpec) (*job, error) {
 			j.record.EpisodeTitle = r.EpisodeTitle
 			j.record.Paused = false
 			j.err = ""
+			j.aiMapping = false
+			j.aiCheckedFor = [2]int{}
 			j.t.AllowDataDownload()
-			if idx, ok := findEpisodeFileIndex(j.record.EpisodeFiles, r.Season, r.Episode); ok && j.t.Info() != nil && idx < len(j.t.Files()) {
+			if idx, ok := m.findReadyEpisodeIndexLocked(j.record.EpisodeFiles, r.Season, r.Episode); ok && j.t.Info() != nil && idx < len(j.t.Files()) {
 				m.switchJobFileLocked(j, idx)
 			} else {
-				// Re-evaluate file selection for new target episode
+				// Re-evaluate file selection (with AI check when enabled) for the new target episode
 				m.clearPrioritiesLocked(j)
 				j.file = nil
 				j.record.FileIndex = -1
@@ -458,7 +510,11 @@ func (m *Manager) addLocked(r Record, spec *torrent.TorrentSpec) (*job, error) {
 	spec.IgnoreUnverifiedPieceCompletion = true
 	spec.Sources = nil
 	spec.Webseeds = nil
-	spec.Trackers = nil
+	if m.disableTrackers {
+		spec.Trackers = nil
+	} else {
+		spec.Trackers = publicTrackers
+	}
 	t, _, err := m.client.AddTorrentSpec(spec)
 	if err != nil {
 		return nil, err
@@ -620,23 +676,65 @@ func videos(t *torrent.Torrent) []VideoFile {
 	return out
 }
 
+func medianVideoSize(files []VideoFile) int64 {
+	if len(files) == 0 {
+		return 0
+	}
+	sizes := make([]int64, len(files))
+	for i, f := range files {
+		sizes[i] = f.Size
+	}
+	sort.Slice(sizes, func(i, j int) bool { return sizes[i] < sizes[j] })
+	return sizes[len(sizes)/2]
+}
+
+func isTinyNonEpisode(size, median int64) bool {
+	return median >= 120<<20 && size < median/6 && size < 80<<20
+}
+
 func mapEpisodeFilesRegex(files []VideoFile, fallbackSeason int) []EpisodeFile {
-	var out []EpisodeFile
+	median := medianVideoSize(files)
+	type parsedFile struct {
+		f VideoFile
+		s int
+		e int
+	}
+	var parsed []parsedFile
+	explicitSeasons := map[int]bool{}
 	for _, f := range files {
+		if isTinyNonEpisode(f.Size, median) {
+			continue
+		}
 		s, e, ok := ranker.ParseEpisodeFilename(f.Name)
 		if !ok || e <= 0 {
 			continue
 		}
-		if s == 0 {
+		if s > 0 {
+			explicitSeasons[s] = true
+		}
+		parsed = append(parsed, parsedFile{f: f, s: s, e: e})
+	}
+	isMultiSeason := len(explicitSeasons) > 1
+	best := map[[2]int]EpisodeFile{}
+	for _, item := range parsed {
+		s := item.s
+		if s == 0 && !isMultiSeason {
 			s = fallbackSeason
 		}
-		out = append(out, EpisodeFile{
-			FileIndex: f.Index,
-			Season:    s,
-			Episode:   e,
-			Name:      f.Name,
-			Size:      f.Size,
-		})
+		key := [2]int{s, item.e}
+		if prev, exists := best[key]; !exists || item.f.Size > prev.Size {
+			best[key] = EpisodeFile{
+				FileIndex: item.f.Index,
+				Season:    s,
+				Episode:   item.e,
+				Name:      item.f.Name,
+				Size:      item.f.Size,
+			}
+		}
+	}
+	out := make([]EpisodeFile, 0, len(best))
+	for _, ef := range best {
+		out = append(out, ef)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Season != out[j].Season {
@@ -645,6 +743,134 @@ func mapEpisodeFilesRegex(files []VideoFile, fallbackSeason int) []EpisodeFile {
 		return out[i].Episode < out[j].Episode
 	})
 	return out
+}
+
+func upsertEpisodeFile(list []EpisodeFile, ef EpisodeFile) []EpisodeFile {
+	out := make([]EpisodeFile, 0, len(list)+1)
+	replaced := false
+	for _, cur := range list {
+		if cur.Season == ef.Season && cur.Episode == ef.Episode {
+			out = append(out, ef)
+			replaced = true
+		} else {
+			out = append(out, cur)
+		}
+	}
+	if !replaced {
+		out = append(out, ef)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Season != out[j].Season {
+			return out[i].Season < out[j].Season
+		}
+		return out[i].Episode < out[j].Episode
+	})
+	return out
+}
+
+func findVerifiedEpisodeFileIndex(mapped []EpisodeFile, season, episode int) (int, bool) {
+	for _, ef := range mapped {
+		if ef.AIVerified && ef.Season == season && ef.Episode == episode {
+			return ef.FileIndex, true
+		}
+	}
+	return -1, false
+}
+
+func (m *Manager) findReadyEpisodeIndexLocked(mapped []EpisodeFile, season, episode int) (int, bool) {
+	if idx, ok := findVerifiedEpisodeFileIndex(mapped, season, episode); ok {
+		return idx, true
+	}
+	if m.filePicker != nil {
+		// Require AI verification before locking an episode from a season pack
+		return -1, false
+	}
+	return findEpisodeFileIndex(mapped, season, episode)
+}
+
+func selectCandidateFilesForAI(files []VideoFile, season, episode int, episodeTitle string) []VideoFile {
+	median := medianVideoSize(files)
+	var filtered []VideoFile
+	for _, f := range files {
+		if isTinyNonEpisode(f.Size, median) {
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+	if len(filtered) == 0 {
+		filtered = append([]VideoFile(nil), files...)
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Name < filtered[j].Name })
+	if len(filtered) <= 40 {
+		return filtered
+	}
+
+	// Score files so the 40-file shortlist sent to AI always includes the target
+	// season folder, matching episode numbers, and matching episode title words.
+	var titleWords []string
+	for _, w := range strings.Fields(strings.ToLower(episodeTitle)) {
+		w = strings.Trim(w, ".,:;!?\"'()[]-_")
+		if len(w) >= 4 {
+			titleWords = append(titleWords, w)
+		}
+	}
+	sTag1 := fmt.Sprintf("s%02d", season)
+	sTag2 := fmt.Sprintf("season %d", season)
+	sTag3 := fmt.Sprintf("season.%d", season)
+	sTag4 := fmt.Sprintf("season_%d", season)
+	sTag5 := fmt.Sprintf("season %02d", season)
+
+	type scored struct {
+		f     VideoFile
+		score int
+		pos   int
+	}
+	items := make([]scored, 0, len(filtered))
+	for pos, f := range filtered {
+		lower := strings.ToLower(f.Name)
+		sc := 0
+		if ranker.HasExplicitSxxExx(f.Name, season, episode) {
+			sc += 100
+		}
+		if ps, pe, ok := ranker.ParseEpisodeFilename(f.Name); ok {
+			if ps == season {
+				sc += 40
+			}
+			if pe == episode {
+				sc += 35
+			} else if pe > 0 && absInt(pe-episode) <= 3 {
+				sc += 10
+			}
+		}
+		if season > 0 && (strings.Contains(lower, sTag1) || strings.Contains(lower, sTag2) || strings.Contains(lower, sTag3) || strings.Contains(lower, sTag4) || strings.Contains(lower, sTag5)) {
+			sc += 30
+		}
+		for _, w := range titleWords {
+			if strings.Contains(lower, w) {
+				sc += 25
+			}
+		}
+		items = append(items, scored{f: f, score: sc, pos: pos})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].score != items[j].score {
+			return items[i].score > items[j].score
+		}
+		return items[i].pos < items[j].pos
+	})
+	picked := make([]VideoFile, 0, 40)
+	for i := 0; i < min(40, len(items)); i++ {
+		picked = append(picked, items[i].f)
+	}
+	sort.Slice(picked, func(i, j int) bool { return picked[i].Name < picked[j].Name })
+	return picked
+}
+
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func findEpisodeFileIndex(mapped []EpisodeFile, season, episode int) (int, bool) {
@@ -669,7 +895,11 @@ func (m *Manager) status(j *job) Status {
 	s.Peers = len(j.t.PeerConns())
 	if j.t.Info() != nil {
 		s.Files = videos(j.t)
-		s.State = "select-file"
+		if j.aiMapping && j.file == nil {
+			s.State = "metadata"
+		} else {
+			s.State = "select-file"
+		}
 	}
 	if j.file != nil {
 		s.Size = j.file.Length()
@@ -905,10 +1135,13 @@ func (m *Manager) UpdateWithDuration(hash, action string, index int, position, d
 	case "unkeep":
 		j.record.Keep = false
 	case "select":
+		var chosen VideoFile
 		found := false
 		for _, f := range videos(j.t) {
 			if f.Index == index {
+				chosen = f
 				found = true
+				break
 			}
 		}
 		if !found {
@@ -917,13 +1150,17 @@ func (m *Manager) UpdateWithDuration(hash, action string, index int, position, d
 		if len(j.readers) > 0 && j.record.MediaType != "episode" {
 			return errors.New("stop playback before changing files")
 		}
-		// Update season/episode metadata if selecting a mapped episode in a season pack
-		for _, ef := range j.record.EpisodeFiles {
-			if ef.FileIndex == index {
-				j.record.Season = ef.Season
-				j.record.Episode = ef.Episode
-				break
-			}
+		j.err = ""
+		j.aiMapping = false
+		if j.record.MediaType == "episode" && j.record.Season > 0 && j.record.Episode > 0 {
+			j.record.EpisodeFiles = upsertEpisodeFile(j.record.EpisodeFiles, EpisodeFile{
+				FileIndex:  index,
+				Season:     j.record.Season,
+				Episode:    j.record.Episode,
+				Name:       chosen.Name,
+				Size:       chosen.Size,
+				AIVerified: true,
+			})
 		}
 		m.switchJobFileLocked(j, index)
 	case "progress":
@@ -1183,7 +1420,10 @@ func (m *Manager) schedule(j *job) {
 				j.record.EpisodeFiles = mapEpisodeFilesRegex(files, j.record.Season)
 				_ = m.save(j)
 			}
-			if idx, ok := findEpisodeFileIndex(j.record.EpisodeFiles, j.record.Season, j.record.Episode); ok {
+			targetSE := [2]int{j.record.Season, j.record.Episode}
+
+			// 1. If already verified for this (season, episode) (or AI picker is not wired), select immediately.
+			if idx, ok := m.findReadyEpisodeIndexLocked(j.record.EpisodeFiles, j.record.Season, j.record.Episode); ok && idx < len(j.t.Files()) {
 				j.record.FileIndex = idx
 				j.file = j.t.Files()[idx]
 				if err := m.save(j); err != nil {
@@ -1191,19 +1431,102 @@ func (m *Manager) schedule(j *job) {
 					j.t.DisallowDataDownload()
 					return
 				}
-			} else if !j.aiMapped && m.fileMapper != nil {
+			} else if m.filePicker != nil && !j.aiMapping && j.aiCheckedFor != targetSE {
+				// 2. Always have local AI inspect season-pack files before downloading an episode.
+				j.aiMapping = true
+				j.aiCheckedFor = targetSE
+				hashCopy := j.record.Hash
+				titleCopy := j.record.Title
+				epTitleCopy := j.record.EpisodeTitle
+				seasonCopy := j.record.Season
+				epCopy := j.record.Episode
+				allFiles := append([]VideoFile(nil), files...)
+				shortlist := selectCandidateFilesForAI(allFiles, seasonCopy, epCopy, epTitleCopy)
+				picker := m.filePicker
+				m.wg.Add(1)
+				go func() {
+					defer m.wg.Done()
+					pick, err := picker(m.ctx, titleCopy, seasonCopy, epCopy, epTitleCopy, shortlist)
+					m.mu.Lock()
+					defer m.mu.Unlock()
+					cur := m.jobs[hashCopy]
+					if cur == nil || cur.t.Info() == nil {
+						return
+					}
+					cur.aiMapping = false
+					if cur.record.Season != seasonCopy || cur.record.Episode != epCopy {
+						return
+					}
+					if err == nil {
+						if pick.Found && pick.FileIndex >= 0 && pick.FileIndex < len(cur.t.Files()) {
+							var chosen VideoFile
+							for _, vf := range allFiles {
+								if vf.Index == pick.FileIndex {
+									chosen = vf
+									break
+								}
+							}
+							cur.record.EpisodeFiles = upsertEpisodeFile(cur.record.EpisodeFiles, EpisodeFile{
+								FileIndex:  pick.FileIndex,
+								Season:     seasonCopy,
+								Episode:    epCopy,
+								Name:       chosen.Name,
+								Size:       chosen.Size,
+								AIVerified: true,
+							})
+							cur.record.FileIndex = pick.FileIndex
+							cur.file = cur.t.Files()[pick.FileIndex]
+							_ = m.save(cur)
+							slog.Info("AI selected season-pack episode file", "series", titleCopy, "season", seasonCopy, "episode", epCopy, "file", chosen.Name, "reason", pick.Reason)
+							return
+						}
+						// AI explicitly says episode is not in this pack; only override if a filename
+						// literally contains explicit SxxExx / NxNN for this exact episode.
+						for _, vf := range allFiles {
+							if ranker.HasExplicitSxxExx(vf.Name, seasonCopy, epCopy) && vf.Index < len(cur.t.Files()) {
+								cur.record.EpisodeFiles = upsertEpisodeFile(cur.record.EpisodeFiles, EpisodeFile{
+									FileIndex:  vf.Index,
+									Season:     seasonCopy,
+									Episode:    epCopy,
+									Name:       vf.Name,
+									Size:       vf.Size,
+									AIVerified: true,
+								})
+								cur.record.FileIndex = vf.Index
+								cur.file = cur.t.Files()[vf.Index]
+								_ = m.save(cur)
+								slog.Info("kept explicit SxxExx match over AI miss", "series", titleCopy, "season", seasonCopy, "episode", epCopy, "file", vf.Name)
+								return
+							}
+						}
+						slog.Warn("AI reported episode not found in season pack", "series", titleCopy, "season", seasonCopy, "episode", epCopy, "reason", pick.Reason)
+						if len(cur.record.Fallbacks) > 0 && cur.file == nil {
+							cur.err = fmt.Sprintf("S%02dE%02d not found in pack", seasonCopy, epCopy)
+						}
+						return
+					}
+					// AI disabled, offline, or errored: gracefully fall back to improved regex mapping.
+					slog.Info("season-pack AI file check unavailable; using regex fallback", "series", titleCopy, "season", seasonCopy, "episode", epCopy, "error", err)
+					if idx, ok := findEpisodeFileIndex(cur.record.EpisodeFiles, seasonCopy, epCopy); ok && idx < len(cur.t.Files()) {
+						cur.record.FileIndex = idx
+						cur.file = cur.t.Files()[idx]
+						_ = m.save(cur)
+						return
+					}
+					if len(cur.record.Fallbacks) > 0 && cur.file == nil {
+						cur.err = fmt.Sprintf("S%02dE%02d not found in pack", seasonCopy, epCopy)
+					}
+				}()
+				return
+			} else if j.aiMapping {
+				return
+			} else if !j.aiMapped && m.fileMapper != nil && m.filePicker == nil {
 				j.aiMapped = true
 				hashCopy := j.record.Hash
 				titleCopy := j.record.Title
 				seasonCopy := j.record.Season
 				epCopy := j.record.Episode
-				filesCopy := append([]VideoFile(nil), files...)
-				sort.Slice(filesCopy, func(a, b int) bool { return filesCopy[a].Name < filesCopy[b].Name })
-				if len(filesCopy) > 60 {
-					center := max(0, epCopy-1)
-					startIdx := max(0, min(center-20, len(filesCopy)-60))
-					filesCopy = filesCopy[startIdx:min(len(filesCopy), startIdx+60)]
-				}
+				filesCopy := selectCandidateFilesForAI(files, seasonCopy, epCopy, j.record.EpisodeTitle)
 				mapper := m.fileMapper
 				m.wg.Add(1)
 				go func() {
@@ -1216,8 +1539,10 @@ func (m *Manager) schedule(j *job) {
 						return
 					}
 					if err == nil && len(mapped) > 0 {
-						cur.record.EpisodeFiles = mapped
-						if idx, ok := findEpisodeFileIndex(mapped, seasonCopy, epCopy); ok && idx < len(cur.t.Files()) {
+						for _, ef := range mapped {
+							cur.record.EpisodeFiles = upsertEpisodeFile(cur.record.EpisodeFiles, ef)
+						}
+						if idx, ok := findEpisodeFileIndex(cur.record.EpisodeFiles, seasonCopy, epCopy); ok && idx < len(cur.t.Files()) {
 							cur.record.FileIndex = idx
 							cur.file = cur.t.Files()[idx]
 							_ = m.save(cur)
@@ -1229,11 +1554,9 @@ func (m *Manager) schedule(j *job) {
 					}
 				}()
 				return
-			} else if j.aiMapped || m.fileMapper == nil {
-				if len(j.record.Fallbacks) > 0 {
-					j.err = fmt.Sprintf("S%02dE%02d not found in pack", j.record.Season, j.record.Episode)
-					return
-				}
+			} else if len(j.record.Fallbacks) > 0 {
+				j.err = fmt.Sprintf("S%02dE%02d not found in pack", j.record.Season, j.record.Episode)
+				return
 			}
 		} else if len(files) > 0 {
 			sort.Slice(files, func(a, b int) bool { return files[a].Size > files[b].Size })
@@ -1308,15 +1631,24 @@ func (m *Manager) schedule(j *job) {
 		}
 	}
 	if first >= 0 {
-		// Keep enough work queued to use several fast peers while preserving
-		// sequential playback. Reader priorities still outrank this window.
+		// Keep a generous sequential window queued so fast peers saturate parallel
+		// pieces while playback-critical head/edge pieces strictly outrank the rest.
 		_, bgWin, edgeBytes := streamWindow(j.file.Length())
 		window := max(1, int(bgWin/pl))
 		for p := first; p < min(end, first+window); p++ {
 			if !j.t.PieceState(p).Complete {
 				next[p] = torrent.PiecePriorityNormal
 			}
-		} // Beginning and tail accelerate container probing; actual seek readers outrank these.
+		}
+		if j.file.Length() >= 200<<20 {
+			nearHead := max(1, int((16<<20)/pl))
+			for p := first; p < min(end, first+nearHead); p++ {
+				if !j.t.PieceState(p).Complete {
+					next[p] = torrent.PiecePriorityReadahead
+				}
+			}
+		}
+		// Beginning and tail accelerate container probing; actual seek readers outrank these.
 		edge := max(1, int(edgeBytes/pl))
 		for p := start; p < min(end, start+edge); p++ {
 			if !j.t.PieceState(p).Complete {

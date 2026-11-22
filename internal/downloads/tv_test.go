@@ -3,6 +3,7 @@ package downloads
 import (
 	"bigflix/internal/database"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -261,5 +263,75 @@ func TestLRUEvictionProtectsKeptAndActiveReaders(t *testing.T) {
 	// Kept item must still exist!
 	if _, err := mgr.Get(kept.Hash); err != nil {
 		t.Fatalf("kept download was wrongly evicted: %v", err)
+	}
+}
+
+func TestSeasonPackAlwaysVerifiesWithAIPicker(t *testing.T) {
+	root := t.TempDir()
+	packDir := filepath.Join(root, "source", "Naruto.Complete")
+	if err := os.MkdirAll(packDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Absolute-numbered pack where S02E01 is actually file 027 (not 001!).
+	// Regex alone with fallbackSeason=2 would mistakenly map 001.mp4 as S02E01!
+	names := []string{"001 - Enter Naruto.mp4", "027 - The Chunin Exam Stage 2.mp4"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(packDir, name), make([]byte, 1<<20), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info := metainfo.Info{PieceLength: 128 << 10}
+	if err := info.BuildFromFilePath(packDir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mi := &metainfo.MetaInfo{InfoBytes: b}
+
+	db, err := database.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mgr, err := Open(db, Options{MediaDir: filepath.Join(root, "cache"), ClientConfig: isolatedConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	var pickerCalls atomic.Int32
+	mgr.SetFilePicker(func(ctx context.Context, seriesTitle string, season, episode int, episodeTitle string, files []VideoFile) (EpisodePick, error) {
+		pickerCalls.Add(1)
+		for _, f := range files {
+			if strings.Contains(f.Name, "Chunin Exam") {
+				return EpisodePick{Found: true, FileIndex: f.Index, Reason: "Matched episode title"}, nil
+			}
+		}
+		return EpisodePick{Found: false, FileIndex: -1, Reason: "missing"}, nil
+	})
+
+	status, err := mgr.AddMetaMedia(mi, MediaRequest{
+		Title:        "Naruto",
+		MediaType:    "episode",
+		TMDBID:       46260,
+		Season:       2,
+		Episode:      1,
+		EpisodeTitle: "The Chunin Exam Stage 2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eventually(t, func() bool {
+		cur, err := mgr.Get(status.Hash)
+		return err == nil && cur.FileIndex >= 0 && pickerCalls.Load() == 1
+	})
+
+	cur, _ := mgr.Get(status.Hash)
+	if !strings.Contains(cur.Files[cur.FileIndex].Name, "027 - The Chunin Exam Stage 2.mp4") {
+		t.Fatalf("expected AI picker to select 027 (not regex false-match 001), got %q", cur.Files[cur.FileIndex].Name)
 	}
 }

@@ -66,6 +66,21 @@ func NewWithRestart(service *catalog.Service, engine *downloads.Manager, restart
 	agg := sources.NewAggregator(store)
 	cl := ai.NewClassifier(store)
 	if engine != nil {
+		engine.SetFilePicker(func(ctx context.Context, seriesTitle string, season, episode int, episodeTitle string, files []downloads.VideoFile) (downloads.EpisodePick, error) {
+			entries := make([]ai.FileEntry, 0, len(files))
+			for _, f := range files {
+				entries = append(entries, ai.FileEntry{Index: f.Index, Path: f.Name, Size: f.Size})
+			}
+			res, err := cl.PickEpisodeFile(ctx, seriesTitle, season, episode, episodeTitle, entries)
+			if err != nil {
+				return downloads.EpisodePick{}, err
+			}
+			return downloads.EpisodePick{
+				Found:     res.Found,
+				FileIndex: res.FileIndex,
+				Reason:    res.Reason,
+			}, nil
+		})
 		engine.SetFileMapper(func(ctx context.Context, seriesTitle string, targetSeason int, files []downloads.VideoFile) ([]downloads.EpisodeFile, error) {
 			entries := make([]ai.FileEntry, 0, len(files))
 			byIdx := map[int]downloads.VideoFile{}

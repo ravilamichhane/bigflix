@@ -35,6 +35,12 @@ type FileEpisodeMapping struct {
 	Episode   int `json:"episode"`
 }
 
+type EpisodePickResult struct {
+	Found     bool   `json:"found"`
+	FileIndex int    `json:"file_index"`
+	Reason    string `json:"reason"`
+}
+
 func NewClassifier(store *database.Store) *Classifier {
 	return &Classifier{
 		store:  store,
@@ -368,6 +374,76 @@ Reject ONLY clear wrong titles (e.g. target only in release group), samples/extr
 		reordered = append(reordered, candidates[topN:]...)
 	}
 	return reordered, "ai", strings.TrimSpace(parsed.Note)
+}
+
+// PickEpisodeFile asks the local CPU model to inspect a season pack's video
+// files and pick the exact file_index matching the requested TV episode
+// (using series title, season, episode number, and TMDB episode title).
+// Because it returns a single compact JSON object (~30 tokens), it runs fast
+// even on 0.8B CPU models and never truncates on large packs.
+func (c *Classifier) PickEpisodeFile(ctx context.Context, seriesTitle string, season, episode int, episodeTitle string, files []FileEntry) (EpisodePickResult, error) {
+	if len(files) == 0 {
+		return EpisodePickResult{}, errors.New("no video files provided")
+	}
+	cfg := c.loadConfig(ctx)
+	if !cfg.Enabled || strings.TrimSpace(cfg.APIURL) == "" {
+		return EpisodePickResult{}, errors.New("AI classifier not configured")
+	}
+	release, ok := c.acquire(ctx, 6*time.Second)
+	if !ok {
+		return EpisodePickResult{}, errors.New("AI classifier busy")
+	}
+	defer release()
+
+	limit := min(40, len(files))
+	var sb strings.Builder
+	if strings.TrimSpace(episodeTitle) != "" {
+		fmt.Fprintf(&sb, "Target TV Episode: %q S%02dE%02d (%q)\nFiles:\n", seriesTitle, season, episode, episodeTitle)
+	} else {
+		fmt.Fprintf(&sb, "Target TV Episode: %q S%02dE%02d\nFiles:\n", seriesTitle, season, episode)
+	}
+	validIdx := map[int]bool{}
+	for i := 0; i < limit; i++ {
+		f := files[i]
+		validIdx[f.Index] = true
+		fmt.Fprintf(&sb, "[%d] %s %q\n", f.Index, ranker.FormatBytes(f.Size), f.Path)
+	}
+
+	systemPrompt := `Pick the exact file_index in the list matching the target TV series season, episode number, and episode title.
+Rules:
+- Check folder names (e.g. "Season 2") AND filenames (S02E01, 2x01, or absolute anime numbering matching the episode title).
+- Never pick samples, trailers, extras, bonus features, openings/endings (NCOP/NCED), or OVAs.
+- If the target episode is NOT in the list (e.g. wrong season pack), return {"found":false,"file_index":-1,"reason":"wrong season or missing"}.
+- Keep reason <= 10 words. Return JSON only.`
+
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"found":      map[string]any{"type": "boolean"},
+			"file_index": map[string]any{"type": "integer"},
+			"reason":     map[string]any{"type": "string"},
+		},
+		"required":             []string{"found", "file_index", "reason"},
+		"additionalProperties": false,
+	}
+
+	raw, err := c.callJSONSchema(ctx, cfg, systemPrompt, sb.String(), "pick_episode_file", schema, 160)
+	if err != nil {
+		return EpisodePickResult{}, err
+	}
+	var out EpisodePickResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return EpisodePickResult{}, err
+	}
+	if out.Found {
+		if !validIdx[out.FileIndex] {
+			return EpisodePickResult{}, fmt.Errorf("AI returned invalid file_index %d", out.FileIndex)
+		}
+	} else {
+		out.FileIndex = -1
+	}
+	out.Reason = strings.TrimSpace(out.Reason)
+	return out, nil
 }
 
 // MapSeasonPackFiles asks the local CPU model to map ambiguous torrent file paths

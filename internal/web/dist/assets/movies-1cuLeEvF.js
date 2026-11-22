@@ -1,1 +1,0 @@
-import{u as t,j as s,n as a}from"./index-Cp5mpZFc.js";import{B as n}from"./BrowsePage-DYdvXQ9O.js";function m(){const o=t({select:e=>e.location.searchStr});return s.jsx(n,{mode:"movie",search:o,navigate:a})}export{m as component};

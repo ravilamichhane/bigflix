@@ -198,6 +198,46 @@ func TestClassifierExtractsJSONWithThinkTagsAndReasoningContent(t *testing.T) {
 	}
 }
 
+func TestPickEpisodeFile(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "ai_pick.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"finish_reason": "stop",
+					"message": map[string]any{
+						"content": `{"found":true,"file_index":7,"reason":"Matches Season 2 Ep 1 Seven Thirty-Seven"}`,
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	_ = db.PutConfig(context.Background(), "ai", database.AIConfig{
+		Enabled:    true,
+		APIURL:     srv.URL + "/v1",
+		Model:      "Qwen3.5-0.8B",
+		TimeoutSec: 5,
+	})
+	cl := NewClassifier(db)
+	cl.SetClient(srv.Client())
+
+	pick, err := cl.PickEpisodeFile(context.Background(), "Breaking Bad", 2, 1, "Seven Thirty-Seven", []FileEntry{
+		{Index: 0, Path: "Breaking Bad/001 - Pilot.mkv", Size: 1_200_000_000},
+		{Index: 7, Path: "Breaking Bad/008 - Seven Thirty-Seven.mkv", Size: 1_300_000_000},
+	})
+	if err != nil || !pick.Found || pick.FileIndex != 7 {
+		t.Fatalf("expected AI pick file_index=7, got %+v err=%v", pick, err)
+	}
+}
+
 func TestClassifierGracefulFallbackWhenOffline(t *testing.T) {
 	db, err := database.Open(filepath.Join(t.TempDir(), "ai2.db"))
 	if err != nil {

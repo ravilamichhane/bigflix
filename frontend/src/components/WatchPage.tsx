@@ -42,6 +42,7 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
   const [actionError, setActionError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [selectedFile, setSelectedFile] = useState("");
+  const [showFilePicker, setShowFilePicker] = useState(false);
   const [codecNote, setCodecNote] = useState("");
   const [copiedVlc, setCopiedVlc] = useState(false);
   const [retrySignal, setRetrySignal] = useState(0);
@@ -56,6 +57,7 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
 
   useEffect(() => {
     setShowSources(false);
+    setShowFilePicker(false);
     setNearEnd(false);
     setSwitchingEp(false);
     setActionError("");
@@ -130,10 +132,13 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
   const nextEpisode = seasonEpisodes.find((e) => e.episodeNumber === currentEpisode + 1);
 
   useEffect(() => {
-    if (latest?.state === "select-file" && latest.files.length > 0 && !selectedFile) {
+    if (!latest || latest.files.length === 0) return;
+    if (latest.fileIndex >= 0 && !showFilePicker) {
+      setSelectedFile(String(latest.fileIndex));
+    } else if (latest.state === "select-file" && !selectedFile) {
       setSelectedFile(String(latest.files[0].index));
     }
-  }, [latest, selectedFile]);
+  }, [latest, selectedFile, showFilePicker]);
 
   async function runAction(action: string, idx = 0) {
     setActionBusy(true);
@@ -141,6 +146,10 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
     try {
       const res = await client.updateDownload({ hash, action, fileIndex: idx });
       if (res.download) setLatest(res.download);
+      if (action === "select") {
+        setShowFilePicker(false);
+        navigate(`/watch/${hash}?file=${idx}`);
+      }
     } catch (err) {
       setActionError(errMessage(err));
     } finally {
@@ -359,9 +368,9 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
             </div>
           )}
 
-          {latest?.state === "select-file" && (
+          {(latest?.state === "select-file" || (showFilePicker && (latest?.files.length || 0) > 1)) && (
             <section className="ds-card">
-              <h2>Select video file</h2>
+              <h2>Select video file in pack</h2>
               <div className="file-picker-row">
                 <select
                   id="file-select"
@@ -370,7 +379,7 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
                   value={selectedFile}
                   onChange={(e) => setSelectedFile(e.target.value)}
                 >
-                  {latest.files.map((f) => (
+                  {latest!.files.map((f) => (
                     <option key={f.index} value={f.index}>
                       {f.name} · {formatBytes(f.size)}
                     </option>
@@ -422,6 +431,14 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
               </p>
             )}
 
+            {latest && latest.files.length > 1 && latest.fileIndex >= 0 && (
+              <p className="muted mono" style={{ margin: 0, fontSize: 12 }}>
+                File:{" "}
+                {latest.files.find((f) => f.index === latest.fileIndex)?.name ||
+                  `#${latest.fileIndex}`}
+              </p>
+            )}
+
             <div className="dl-actions">
               {(latest?.tmdbId || 0) > 0 && (
                 <Button
@@ -431,6 +448,16 @@ export function WatchPage({ hash, fileIndex, navigate }: WatchPageProps) {
                   onClick={() => setShowSources(true)}
                 >
                   <SlidersIcon size={14} /> Switch source
+                </Button>
+              )}
+              {(latest?.files.length || 0) > 1 && latest?.state !== "select-file" && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!latest || actionBusy}
+                  onClick={() => setShowFilePicker((v) => !v)}
+                >
+                  {showFilePicker ? "Hide files" : `Change file (${latest!.files.length})`}
                 </Button>
               )}
               <Button

@@ -10,14 +10,14 @@ import (
 
 // Called with m.mu held. Keep recovery independent of playback readers and storage.
 func (m *Manager) recoverPeersLocked(j *job, now time.Time) {
-	if j.record.Paused || j.err != "" || (j.file != nil && j.file.BytesCompleted() == j.file.Length()) || len(j.t.PeerConns()) > 0 {
+	if j.record.Paused || j.err != "" || (j.file != nil && j.file.BytesCompleted() == j.file.Length()) || len(j.t.PeerConns()) >= 5 {
 		j.peerlessSince = time.Time{}
 		return
 	}
 	if j.peerlessSince.IsZero() {
 		j.peerlessSince = now
 	}
-	if now.Sub(j.peerlessSince) >= 30*time.Second && now.Sub(j.lastDiscovery) >= time.Minute {
+	if now.Sub(j.peerlessSince) >= 15*time.Second && now.Sub(j.lastDiscovery) >= 45*time.Second {
 		m.discoverLocked(j, now)
 	}
 }

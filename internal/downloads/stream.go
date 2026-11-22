@@ -117,7 +117,7 @@ func (m *Manager) Stream(w http.ResponseWriter, r *http.Request, hash string) {
 	// client write backpressure (client disconnects cancel r.Context()).
 	idle := time.AfterFunc(45*time.Second, cancel)
 	defer idle.Stop()
-	buf := make([]byte, 64<<10)
+	buf := make([]byte, 256<<10)
 	left := end - start + 1
 	sent := false
 	for left > 0 {

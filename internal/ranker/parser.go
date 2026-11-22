@@ -64,8 +64,9 @@ var (
 	reDDP        = regexp.MustCompile(`(?i)\b(ddp|dd\+|eac3|e-ac-3)\b`)
 	reAC3        = regexp.MustCompile(`(?i)\b(ac3|dd5\.1|dd2\.0)\b`)
 	reAAC        = regexp.MustCompile(`(?i)\baac\b`)
-	reSample     = regexp.MustCompile(`(?i)\b(sample|trailer|featurette|deleted\.?scenes?)\b`)
-	reNonFeature = regexp.MustCompile(`(?i)(\(\s*digital\s*\)|\b(making[\s._-]+of|behind[\s._-]+the[\s._-]+scenes?|the[\s._-]+real[\s._-]+story|soundtrack|\bost\b|manga|epub|cbz|cbr|pdf)\b)`)
+	reSample          = regexp.MustCompile(`(?i)\b(sample|trailer|featurette|deleted[\s._-]?scenes?|behind[\s._-]?the[\s._-]?scenes?|ncop\d*|nced\d*|creditless|opening|ending|recap|preview|interview|bloopers?|gag[\s._-]?reel|\bova\b|\boad\b)\b`)
+	reNonEpisodeDir   = regexp.MustCompile(`(?i)(^|/)(extras?|specials?|bonus|featurettes?|trailers?|samples?|ovas?|oads?|ncop|nced|pvs?|minisodes?|deleted[\s._-]*scenes?|behind[\s._-]*the[\s._-]*scenes?|interviews?)(/|$)`)
+	reNonFeature      = regexp.MustCompile(`(?i)(\(\s*digital\s*\)|\b(making[\s._-]+of|behind[\s._-]+the[\s._-]+scenes?|the[\s._-]+real[\s._-]+story|soundtrack|\bost\b|manga|epub|cbz|cbr|pdf)\b)`)
 	reHCSub      = regexp.MustCompile(`(?i)\b(hc|korsub|hardsub|hardcoded)\b`)
 	reMulti      = regexp.MustCompile(`(?i)\b(multi\d*|dual[\s._-]?audio)\b`)
 	reDualAudio  = regexp.MustCompile(`(?i)\b(dual[\s._-]?audio)\b`)
@@ -392,16 +393,72 @@ func ParseRelease(title string) ParsedRelease {
 	return p
 }
 
+// extractFolderSeason scans parent directory segments from innermost to outermost
+// so "Show.S01-S05.Complete/Season 3/01.mkv" yields season 3 rather than matching
+// the root range folder "S01-S05".
+func extractFolderSeason(cleanPath string) int {
+	dir := filepath.Dir(cleanPath)
+	if dir == "." || dir == "/" || dir == "" {
+		return 0
+	}
+	parts := strings.Split(dir, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := strings.TrimSpace(parts[i])
+		if seg == "" || reSRange.MatchString(seg) {
+			continue
+		}
+		if m := reSOnly.FindStringSubmatch(seg); len(m) >= 3 {
+			raw := m[1]
+			if raw == "" {
+				raw = m[2]
+			}
+			if s, err := strconv.Atoi(raw); err == nil && s > 0 {
+				return s
+			}
+		}
+	}
+	return 0
+}
+
+// HasExplicitSxxExx reports whether path's basename literally encodes the
+// requested season and episode (e.g. "S02E01" or "2x01") and is not a sample/extra.
+func HasExplicitSxxExx(path string, season, episode int) bool {
+	if season <= 0 || episode <= 0 {
+		return false
+	}
+	clean := filepath.ToSlash(path)
+	if reNonEpisodeDir.MatchString(clean) || reSample.MatchString(filepath.Base(clean)) {
+		return false
+	}
+	base := filepath.Base(clean)
+	if m := reSxxExx.FindStringSubmatch(base); len(m) >= 3 {
+		s, _ := strconv.Atoi(m[1])
+		e, _ := strconv.Atoi(m[2])
+		if s == season && e == episode {
+			return true
+		}
+		if len(m) >= 4 && m[3] != "" {
+			e2, _ := strconv.Atoi(m[3])
+			if s == season && episode >= e && episode <= e2 {
+				return true
+			}
+		}
+	}
+	if s, e, ok := matchNxNN(base); ok && s == season && e == episode {
+		return true
+	}
+	return false
+}
+
 // ParseEpisodeFilename maps a video file path inside a torrent (e.g., season pack)
 // to (season, episode). Returns season=0 when only an episode number is present
 // (common in single-season anime packs).
 func ParseEpisodeFilename(path string) (season, episode int, ok bool) {
 	clean := filepath.ToSlash(path)
-	lower := strings.ToLower(clean)
-	if strings.Contains(lower, "/extras/") || strings.Contains(lower, "/specials/") || strings.Contains(lower, "/featurettes/") || reSample.MatchString(filepath.Base(clean)) {
+	base := filepath.Base(clean)
+	if reNonEpisodeDir.MatchString(clean) || reSample.MatchString(base) {
 		return 0, 0, false
 	}
-	base := filepath.Base(clean)
 	if m := reSxxExx.FindStringSubmatch(base); len(m) >= 3 {
 		s, _ := strconv.Atoi(m[1])
 		e, _ := strconv.Atoi(m[2])
@@ -410,29 +467,25 @@ func ParseEpisodeFilename(path string) (season, episode int, ok bool) {
 	if s, e, ok := matchNxNN(base); ok {
 		return s, e, e > 0
 	}
-	parentSeason := 0
-	if m := reSOnly.FindStringSubmatch(clean); len(m) >= 3 {
-		raw := m[1]
-		if raw == "" {
-			raw = m[2]
-		}
-		parentSeason, _ = strconv.Atoi(raw)
+	parentSeason := extractFolderSeason(clean)
+	isBogusEpNum := func(e int) bool {
+		return e <= 0 || e == 264 || e == 265 || e == 480 || e == 576 || e == 720 || e == 1080 || e == 1440 || e == 2160 || (e >= 1940 && e <= 2035)
 	}
 	if m := reEpWord.FindStringSubmatch(base); len(m) >= 2 {
 		e, _ := strconv.Atoi(m[1])
-		if e > 0 {
+		if !isBogusEpNum(e) {
 			return parentSeason, e, true
 		}
 	}
 	if m := reBareE.FindStringSubmatch(base); len(m) >= 2 {
 		e, _ := strconv.Atoi(m[1])
-		if e > 0 {
+		if !isBogusEpNum(e) {
 			return parentSeason, e, true
 		}
 	}
 	if m := reAnimeEp.FindStringSubmatch(base); len(m) >= 2 {
 		e, _ := strconv.Atoi(m[1])
-		if e > 0 && e != 480 && e != 720 && e != 1080 && e != 2160 {
+		if !isBogusEpNum(e) {
 			return parentSeason, e, true
 		}
 	}
@@ -447,13 +500,13 @@ func ParseEpisodeFilename(path string) (season, episode int, ok bool) {
 	}
 	if m := reLeadNumEp.FindStringSubmatch(noGroup); len(m) >= 2 {
 		e, _ := strconv.Atoi(m[1])
-		if e > 0 && e < 2000 && e != 480 && e != 720 && e != 1080 {
+		if !isBogusEpNum(e) && e < 1900 {
 			return parentSeason, e, true
 		}
 	}
 	if m := reTrailNumEp.FindStringSubmatch(noGroup); len(m) >= 2 {
 		e, _ := strconv.Atoi(m[1])
-		if e > 0 && e < 1900 && e != 480 && e != 720 && e != 1080 {
+		if !isBogusEpNum(e) && e < 1900 {
 			return parentSeason, e, true
 		}
 	}

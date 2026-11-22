@@ -276,3 +276,28 @@ func TestRanabaaliRegressionAndCodecChannelCollision(t *testing.T) {
 		t.Fatal("expected 5.1x264 WEB-DL release in ranked output")
 	}
 }
+
+func TestParseEpisodeFilenameNestedSeasonAndExtrasExclusion(t *testing.T) {
+	// Root folder S01-S05 range must NOT shadow child folder "Season 3"
+	s, e, ok := ParseEpisodeFilename("Breaking.Bad.S01-S05.Complete/Season 3/01 - No Mas.mkv")
+	if !ok || s != 3 || e != 1 {
+		t.Fatalf("expected S03E01 from nested Season 3 folder, got s=%d e=%d ok=%v", s, e, ok)
+	}
+	for _, junk := range []string{
+		"Breaking.Bad.S01/Bonus/01 - Behind The Scenes.mkv",
+		"Anime/Extras/01 - Recap.mkv",
+		"Anime/NCOP01.mkv",
+		"Anime/OVA 01.mkv",
+		"Show/Sample/Show.S01E01.sample.mkv",
+	} {
+		if gs, ge, gok := ParseEpisodeFilename(junk); gok {
+			t.Fatalf("expected non-episode %q excluded, got s=%d e=%d", junk, gs, ge)
+		}
+	}
+	if !HasExplicitSxxExx("Season 2/Breaking.Bad.S02E01.1080p.mkv", 2, 1) {
+		t.Fatal("expected HasExplicitSxxExx true for S02E01")
+	}
+	if HasExplicitSxxExx("Bonus/Breaking.Bad.S02E01.sample.mkv", 2, 1) {
+		t.Fatal("expected HasExplicitSxxExx false for sample/bonus")
+	}
+}
