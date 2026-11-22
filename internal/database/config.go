@@ -114,7 +114,7 @@ func DefaultPlaybackPrefs() PlaybackPrefs {
 
 func DefaultAIConfig() AIConfig {
 	apiURL := envOr("AI_API_URL", "")
-	timeout := 12
+	timeout := 30
 	if raw := strings.TrimSpace(os.Getenv("AI_TIMEOUT_SEC")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 2 && n <= 60 {
 			timeout = n
@@ -123,7 +123,7 @@ func DefaultAIConfig() AIConfig {
 	return AIConfig{
 		Enabled:    apiURL != "",
 		APIURL:     apiURL,
-		Model:      envOr("AI_MODEL", "Qwen2.5-1.5B-Instruct"),
+		Model:      envOr("AI_MODEL", "Qwen3.5-2B"),
 		APIKey:     envOr("AI_API_KEY", ""),
 		TimeoutSec: timeout,
 	}
@@ -219,10 +219,10 @@ func (s *Store) LoadAIConfig(ctx context.Context) AIConfig {
 		return DefaultAIConfig()
 	}
 	if cfg.TimeoutSec < 2 || cfg.TimeoutSec > 60 {
-		cfg.TimeoutSec = 12
+		cfg.TimeoutSec = 30
 	}
 	if strings.TrimSpace(cfg.Model) == "" {
-		cfg.Model = "Qwen2.5-1.5B-Instruct"
+		cfg.Model = "Qwen3.5-2B"
 	}
 	return cfg
 }

@@ -63,9 +63,9 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
   // Local CPU AI Classifier
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiUrl, setAiUrl] = useState("http://llama-server:8080/v1");
-  const [aiModel, setAiModel] = useState("Qwen2.5-1.5B-Instruct");
+  const [aiModel, setAiModel] = useState("Qwen3.5-2B");
   const [aiKey, setAiKey] = useState("");
-  const [aiTimeout, setAiTimeout] = useState(12);
+  const [aiTimeout, setAiTimeout] = useState(30);
   const [savingAi, setSavingAi] = useState(false);
   const [testingAi, setTestingAi] = useState(false);
   const [aiMsg, setAiMsg] = useState("");
@@ -118,8 +118,8 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
       if (res.ai) {
         setAiEnabled(res.ai.enabled);
         setAiUrl(res.ai.apiUrl || "http://llama-server:8080/v1");
-        setAiModel(res.ai.model || "Qwen2.5-1.5B-Instruct");
-        setAiTimeout(res.ai.timeoutSec || 12);
+        setAiModel(res.ai.model || "Qwen3.5-2B");
+        setAiTimeout(res.ai.timeoutSec || 30);
       }
     } catch (err) {
       setError(errMessage(err));
@@ -487,7 +487,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
             </Badge>
           </div>
           <p className="muted">
-            Connects to local <code>llama-server</code> (e.g. Qwen2.5-1.5B) or Ollama to rank top
+            Connects to local <code>llama-server</code> (e.g. Qwen3.5-2B) or Ollama to rank top
             candidates and map ambiguous season-pack files. Falls back automatically if offline.
           </p>
           <form onSubmit={handleSaveAi} className="settings-form">
@@ -514,7 +514,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                 <input
                   className="ds-input mono"
                   value={aiModel}
-                  placeholder="Qwen2.5-1.5B-Instruct"
+                  placeholder="Qwen3.5-2B"
                   onChange={(e) => setAiModel(e.target.value)}
                 />
               </label>

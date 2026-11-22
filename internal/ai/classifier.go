@@ -38,7 +38,7 @@ type FileEpisodeMapping struct {
 func NewClassifier(store *database.Store) *Classifier {
 	return &Classifier{
 		store:  store,
-		client: sources.LocalClient(30 * time.Second),
+		client: sources.LocalClient(65 * time.Second),
 		slots:  make(chan struct{}, 1),
 	}
 }
@@ -88,15 +88,16 @@ func (c *Classifier) callJSONSchema(ctx context.Context, cfg database.AIConfig, 
 	}
 	timeout := time.Duration(cfg.TimeoutSec) * time.Second
 	if timeout < 2*time.Second {
-		timeout = 12 * time.Second
+		timeout = 25 * time.Second
 	}
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	body := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  maxTokens,
+		"model":        cfg.Model,
+		"temperature":  0.0,
+		"max_tokens":   maxTokens,
+		"cache_prompt": true,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -180,33 +181,28 @@ func (c *Classifier) RankCandidates(ctx context.Context, q sources.Query, prefs 
 	}
 	defer release()
 
-	topN := min(12, len(candidates))
+	topN := min(8, len(candidates))
 	var sb strings.Builder
 	if q.MediaType == "episode" {
-		fmt.Fprintf(&sb, "Target TV Episode: %q (orig: %q, lang: %s) Season %d Episode %d\n",
+		fmt.Fprintf(&sb, "Target TV: %q (orig: %q, lang: %s) S%02dE%02d\n",
 			q.Title, q.OriginalTitle, q.OriginalLanguage, q.Season, q.Episode)
 	} else {
 		fmt.Fprintf(&sb, "Target Movie: %q (orig: %q, year: %d, lang: %s)\n",
 			q.Title, q.OriginalTitle, q.Year, q.OriginalLanguage)
 	}
-	fmt.Fprintf(&sb, "Preferences: target_quality=%s, prefer_browser_friendly_h264=%v, language=%s\nCandidates:\n",
+	fmt.Fprintf(&sb, "Prefs: quality=%s h264=%v lang=%s\nCandidates:\n",
 		prefs.TargetQuality, prefs.PreferDirectPlay, prefs.PreferredLanguage)
 	for i := 0; i < topN; i++ {
 		cand := candidates[i]
 		imdbVerified := (cand.Provider == "yts" || cand.Provider == "eztv") && q.IMDbID != ""
-		fmt.Fprintf(&sb, "[%d] provider=%s imdb_verified=%v seeds=%d size=%s src=%s pack=%v h264_ok=%v title=%q\n",
+		fmt.Fprintf(&sb, "[%d] prov=%s imdb=%v seeds=%d size=%s src=%s pack=%v h264=%v %q\n",
 			i, cand.Provider, imdbVerified, cand.Seeds, cand.Size, cand.SourceType, cand.IsSeasonPack, cand.BrowserFriendly, cand.Title)
 	}
 
-	systemPrompt := `You rank pre-filtered torrent releases for a streaming media server running on a 4-vCPU server.
-Rank the matching candidate IDs (integers from the provided list) from best to worst in ranked_ids.
-RANKING PREFERENCES (rank higher rather than rejecting):
-- Prefer clean BluRay, WEB-DL, WEBRip, HDRip, and HDTV releases matching target quality, healthy seeds, smaller file sizes when quality and seeds are similar, and H.264/AAC browser-friendly releases when prefer_browser_friendly_h264 is true.
-- NEVER reject a matching movie or episode just because it uses x265/HEVC, 2160p/720p, HDRip/HDTV, or omits a language tag — simply rank it lower.
-- NEVER reject candidates with imdb_verified=true.
-- If orig is in a non-Latin script, match against the romanized/English target title.
-ONLY put a candidate in rejected if it is clearly the WRONG movie/show (e.g. target word only in release group "-TOXIC" or different title "A Toxic Love Story" vs "Toxic"), a sample/extra/manga, wrong season/episode, or a single-language foreign dub that conflicts with the requested language.
-Respond strictly as JSON matching the schema.`
+	systemPrompt := `Rank pre-filtered torrent IDs best-to-worst in ranked_ids for a 4-vCPU streaming server.
+Prefer matching quality, healthy seeds, smaller size at equal quality, and h264=true when h264 pref is true.
+Never reject imdb=true or matching titles for x265/2160p/720p/HDRip/HDTV/missing lang — just rank lower. Match non-Latin orig against romanized target title.
+Reject ONLY clear wrong titles (e.g. target only in release group), samples/extras/manga, wrong season/episode, or conflicting single-language dubs. Return JSON only.`
 
 	schema := map[string]any{
 		"type": "object",
@@ -237,7 +233,7 @@ Respond strictly as JSON matching the schema.`
 		"additionalProperties": false,
 	}
 
-	raw, err := c.callJSONSchema(ctx, cfg, systemPrompt, sb.String(), "torrent_ranking", schema, 256)
+	raw, err := c.callJSONSchema(ctx, cfg, systemPrompt, sb.String(), "torrent_ranking", schema, 180)
 	if err != nil {
 		slog.Warn("AI ranking failed; falling back to deterministic", "error", err)
 		return candidates, "deterministic", ""
@@ -393,14 +389,14 @@ func (c *Classifier) TestConnection(ctx context.Context, apiURL, model, apiKey s
 		return 0, "", errors.New("enter an AI API URL (e.g. http://llama-server:8080/v1)")
 	}
 	if strings.TrimSpace(model) == "" {
-		model = "Qwen2.5-1.5B-Instruct"
+		model = "Qwen3.5-2B"
 	}
 	cfg := database.AIConfig{
 		Enabled:    true,
 		APIURL:     apiURL,
 		Model:      model,
 		APIKey:     apiKey,
-		TimeoutSec: 15,
+		TimeoutSec: 30,
 	}
 	start := time.Now()
 	schema := map[string]any{

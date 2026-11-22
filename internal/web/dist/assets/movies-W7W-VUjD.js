@@ -1,1 +1,0 @@
-import{u as t,j as s,n as a}from"./index-B3xe-Ebc.js";import{B as n}from"./BrowsePage-3wgmsMfF.js";function m(){const o=t({select:e=>e.location.searchStr});return s.jsx(n,{mode:"movie",search:o,navigate:a})}export{m as component};
