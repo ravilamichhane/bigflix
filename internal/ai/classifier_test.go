@@ -150,6 +150,54 @@ func TestClassifierProtectsVerifiedIMDbAndExactMatchesFromHallucinatedRejection(
 	}
 }
 
+func TestClassifierExtractsJSONWithThinkTagsAndReasoningContent(t *testing.T) {
+	// Case 1: <think>...</think> prefix before JSON in message.content
+	if got, ok := extractJSONObject("<think>\n\n</think>\n{\"ranked_ids\":[0],\"rejected\":[],\"season_pack_ids\":[],\"note\":\"ok\"}"); !ok || !strings.HasPrefix(got, "{") {
+		t.Fatalf("expected JSON extracted after <think> block, got ok=%v %q", ok, got)
+	}
+
+	// Case 2: empty message.content with valid JSON placed in reasoning_content (llama.cpp Qwen3.5 quirk)
+	db, err := database.Open(filepath.Join(t.TempDir(), "ai_think.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"finish_reason": "stop",
+					"message": map[string]any{
+						"content":           "",
+						"reasoning_content": `{"ranked_ids":[1,0],"rejected":[],"season_pack_ids":[],"note":"Picked 1080p"}`,
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	_ = db.PutConfig(context.Background(), "ai", database.AIConfig{
+		Enabled:    true,
+		APIURL:     srv.URL + "/v1",
+		Model:      "Qwen3.5-0.8B",
+		TimeoutSec: 5,
+	})
+	cl := NewClassifier(db)
+	cl.SetClient(srv.Client())
+
+	cands := []ranker.Candidate{
+		{Hash: strings.Repeat("a", 40), Title: "Dune (2021) 720p WEB-DL x264", Seeds: 20},
+		{Hash: strings.Repeat("b", 40), Title: "Dune (2021) 1080p BluRay x264", Seeds: 80},
+	}
+	got, mode, note := cl.RankCandidates(context.Background(), sources.Query{MediaType: "movie", Title: "Dune", Year: 2021}, database.DefaultPlaybackPrefs(), cands)
+	if mode != "ai" || note != "Picked 1080p" || got[0].Hash != strings.Repeat("b", 40) {
+		t.Fatalf("expected JSON recovered from reasoning_content, got mode=%q note=%q top=%+v", mode, note, got[0])
+	}
+}
+
 func TestClassifierGracefulFallbackWhenOffline(t *testing.T) {
 	db, err := database.Open(filepath.Join(t.TempDir(), "ai2.db"))
 	if err != nil {

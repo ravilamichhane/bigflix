@@ -34,7 +34,7 @@ services:
       FFMPEG_THREADS: "${FFMPEG_THREADS:-2}"
       # Local CPU AI classifier (internal Docker network only)
       AI_API_URL: "${AI_API_URL:-http://llama-server:8080/v1}"
-      AI_MODEL: "${AI_MODEL:-Qwen3.5-2B}"
+      AI_MODEL: "${AI_MODEL:-Qwen3.5-0.8B}"
       AI_TIMEOUT_SEC: "${AI_TIMEOUT_SEC:-30}"
       # Optional built-in indexer mirror overrides
       YTS_API_URL: "${YTS_API_URL:-https://movies-api.accel.li/api/v2/}"
@@ -61,17 +61,19 @@ services:
     restart: unless-stopped
     environment:
       LLAMA_CACHE: "/root/.cache/llama.cpp"
-    # Pulls and caches Qwen3.5-2B Q4_K_M text-only GGUF (~1.4 GB, skips vision mmproj).
-    # For faster CPU speed (~0.6 GB), swap to unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M.
+    # Pulls and caches Qwen3.5-0.8B Q8_0 text-only GGUF (~850 MB, skips vision mmproj).
+    # Q8_0 preserves strong structured JSON accuracy while running ~2-3x faster on 4 vCPU.
     command:
       - "-hf"
-      - "unsloth/Qwen3.5-2B-GGUF:Q4_K_M"
+      - "unsloth/Qwen3.5-0.8B-GGUF:Q8_0"
       - "--no-mmproj"
       - "--jinja"
+      - "--reasoning-budget"
+      - "0"
       - "--chat-template-kwargs"
       - '{"enable_thinking":false}'
       - "--alias"
-      - "Qwen3.5-2B"
+      - "Qwen3.5-0.8B"
       - "--host"
       - "0.0.0.0"
       - "--port"
@@ -84,7 +86,7 @@ services:
       - "4096"
       - "--parallel"
       - "1"
-    mem_limit: 3g
+    mem_limit: 2g
     volumes:
       - llama_cache:/root/.cache/llama.cpp
     networks:

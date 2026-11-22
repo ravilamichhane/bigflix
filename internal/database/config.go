@@ -123,7 +123,7 @@ func DefaultAIConfig() AIConfig {
 	return AIConfig{
 		Enabled:    apiURL != "",
 		APIURL:     apiURL,
-		Model:      envOr("AI_MODEL", "Qwen3.5-2B"),
+		Model:      envOr("AI_MODEL", "Qwen3.5-0.8B"),
 		APIKey:     envOr("AI_API_KEY", ""),
 		TimeoutSec: timeout,
 	}
@@ -222,7 +222,7 @@ func (s *Store) LoadAIConfig(ctx context.Context) AIConfig {
 		cfg.TimeoutSec = 30
 	}
 	if strings.TrimSpace(cfg.Model) == "" {
-		cfg.Model = "Qwen3.5-2B"
+		cfg.Model = "Qwen3.5-0.8B"
 	}
 	return cfg
 }

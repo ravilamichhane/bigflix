@@ -98,6 +98,9 @@ func (c *Classifier) callJSONSchema(ctx context.Context, cfg database.AIConfig, 
 		"temperature":  0.0,
 		"max_tokens":   maxTokens,
 		"cache_prompt": true,
+		"chat_template_kwargs": map[string]any{
+			"enable_thinking": false,
+		},
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -140,26 +143,76 @@ func (c *Classifier) callJSONSchema(ctx context.Context, cfg database.AIConfig, 
 	}
 	var completion struct {
 		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(rawResp, &completion); err != nil || len(completion.Choices) == 0 {
 		return nil, errors.New("AI server returned an unexpected response")
 	}
-	content := strings.TrimSpace(completion.Choices[0].Message.Content)
+	choice := completion.Choices[0]
+	if extracted, ok := extractJSONObject(choice.Message.Content); ok {
+		return []byte(extracted), nil
+	}
+	// Some llama.cpp builds emit schema output into reasoning_content when
+	// thinking templates interact with json_schema; recover valid JSON if present.
+	if extracted, ok := extractJSONObject(choice.Message.ReasoningContent); ok {
+		return []byte(extracted), nil
+	}
+	preview := strings.TrimSpace(choice.Message.Content)
+	if preview == "" {
+		preview = strings.TrimSpace(choice.Message.ReasoningContent)
+	}
+	if len(preview) > 140 {
+		preview = preview[:140] + "…"
+	}
+	return nil, fmt.Errorf("AI server returned non-JSON output (finish_reason=%s, preview=%q)", choice.FinishReason, preview)
+}
+
+func extractJSONObject(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", false
+	}
+	// Strip <think>...</think> blocks (or unclosed <think> prefix) if emitted by Qwen3/3.5
+	for {
+		lower := strings.ToLower(s)
+		start := strings.Index(lower, "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(lower[start:], "</think>")
+		if end >= 0 {
+			s = strings.TrimSpace(s[:start] + s[start+end+len("</think>"):])
+		} else {
+			s = strings.TrimSpace(s[:start])
+			break
+		}
+	}
 	// Strip markdown fences if an OpenAI-compatible server wrapped JSON
-	if strings.HasPrefix(content, "```") {
-		content = strings.TrimPrefix(content, "```json")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-		content = strings.TrimSpace(content)
+	if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```json")
+		s = strings.TrimPrefix(s, "```JSON")
+		s = strings.TrimPrefix(s, "```")
+		s = strings.TrimSuffix(s, "```")
+		s = strings.TrimSpace(s)
 	}
-	if !json.Valid([]byte(content)) {
-		return nil, errors.New("AI server returned non-JSON output")
+	if json.Valid([]byte(s)) {
+		return s, true
 	}
-	return []byte(content), nil
+	// Recover the outermost JSON object if surrounded by brief prose
+	first := strings.IndexByte(s, '{')
+	last := strings.LastIndexByte(s, '}')
+	if first >= 0 && last > first {
+		candidate := strings.TrimSpace(s[first : last+1])
+		if json.Valid([]byte(candidate)) {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 // RankCandidates runs the local CPU AI classifier over the top <=12 pre-filtered
@@ -202,7 +255,7 @@ func (c *Classifier) RankCandidates(ctx context.Context, q sources.Query, prefs 
 	systemPrompt := `Rank pre-filtered torrent IDs best-to-worst in ranked_ids for a 4-vCPU streaming server.
 Prefer matching quality, healthy seeds, smaller size at equal quality, and h264=true when h264 pref is true.
 Never reject imdb=true or matching titles for x265/2160p/720p/HDRip/HDTV/missing lang — just rank lower. Match non-Latin orig against romanized target title.
-Reject ONLY clear wrong titles (e.g. target only in release group), samples/extras/manga, wrong season/episode, or conflicting single-language dubs. Return JSON only.`
+Reject ONLY clear wrong titles (e.g. target only in release group), samples/extras/manga, wrong season/episode, or conflicting single-language dubs. Keep note <= 10 words. Return JSON only.`
 
 	schema := map[string]any{
 		"type": "object",
@@ -233,7 +286,7 @@ Reject ONLY clear wrong titles (e.g. target only in release group), samples/extr
 		"additionalProperties": false,
 	}
 
-	raw, err := c.callJSONSchema(ctx, cfg, systemPrompt, sb.String(), "torrent_ranking", schema, 180)
+	raw, err := c.callJSONSchema(ctx, cfg, systemPrompt, sb.String(), "torrent_ranking", schema, 320)
 	if err != nil {
 		slog.Warn("AI ranking failed; falling back to deterministic", "error", err)
 		return candidates, "deterministic", ""
@@ -389,7 +442,7 @@ func (c *Classifier) TestConnection(ctx context.Context, apiURL, model, apiKey s
 		return 0, "", errors.New("enter an AI API URL (e.g. http://llama-server:8080/v1)")
 	}
 	if strings.TrimSpace(model) == "" {
-		model = "Qwen3.5-2B"
+		model = "Qwen3.5-0.8B"
 	}
 	cfg := database.AIConfig{
 		Enabled:    true,

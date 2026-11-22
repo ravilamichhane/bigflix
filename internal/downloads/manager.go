@@ -243,6 +243,9 @@ func Open(db *database.Store, opts Options) (*Manager, error) {
 	}
 	cfg.DataDir = dir
 	cfg.DefaultStorage = &guardedStorage{base: fs, dir: dir}
+	if cfg.Slogger == nil {
+		cfg.Slogger = slog.New(torrentLogHandler{base: slog.Default().Handler()})
+	}
 	cl, err := torrent.NewClient(cfg)
 	if err != nil {
 		fs.Close()
@@ -312,6 +315,42 @@ func (m *Manager) SetFileMapper(fn FileMapperFunc) {
 	m.mu.Lock()
 	m.fileMapper = fn
 	m.mu.Unlock()
+}
+
+// torrentLogHandler silences noisy anacrolix/torrent reader errors caused by
+// normal browser/FFmpeg HTTP Range closes (err="context canceled") while still
+// forwarding genuine warnings and errors.
+type torrentLogHandler struct {
+	base slog.Handler
+}
+
+func (h torrentLogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= slog.LevelWarn && h.base.Enabled(ctx, level)
+}
+
+func (h torrentLogHandler) Handle(ctx context.Context, r slog.Record) error {
+	if strings.Contains(r.Message, "read failed") {
+		canceled := false
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "err" && strings.Contains(a.Value.String(), "context canceled") {
+				canceled = true
+				return false
+			}
+			return true
+		})
+		if canceled {
+			return nil
+		}
+	}
+	return h.base.Handle(ctx, r)
+}
+
+func (h torrentLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return torrentLogHandler{base: h.base.WithAttrs(attrs)}
+}
+
+func (h torrentLogHandler) WithGroup(name string) slog.Handler {
+	return torrentLogHandler{base: h.base.WithGroup(name)}
 }
 
 // Use opaque filenames and reject symlinks in the storage unit before opening it.
