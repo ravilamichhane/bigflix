@@ -1,0 +1,91 @@
+# Dokploy-ready Compose stack for Bigflix + Local CPU AI Classifier (4 vCPU VPS).
+#
+# In Dokploy:
+#   1. Create Service -> Compose -> connect this repo and set Compose Path to:
+#        docker-compose.dokploy.yml
+#   2. Set AUTH_TOKEN and TMDB_READ_TOKEN (plus optional keys) in the Environment tab.
+#   3. Add a Domain pointing Service "bigflix" -> Container Port 3000 (HTTPS via Traefik).
+#   4. Ensure host directories exist (or let Docker create them on first deploy):
+#        mkdir -p /var/lib/bigflix/data /var/lib/bigflix/media
+#   5. Stop your previous single-container Bigflix app before deploying so port 51413
+#      and /var/lib/bigflix/data (SQLite) do not conflict.
+
+services:
+  bigflix:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports:
+      - "${TORRENT_LISTEN_PORT:-51413}:${TORRENT_LISTEN_PORT:-51413}/tcp"
+      - "${TORRENT_LISTEN_PORT:-51413}:${TORRENT_LISTEN_PORT:-51413}/udp"
+    environment:
+      PORT: "3000"
+      BIND_ADDR: "0.0.0.0"
+      TORRENT_LISTEN_PORT: "${TORRENT_LISTEN_PORT:-51413}"
+      AUTH_TOKEN: "${AUTH_TOKEN:-bigflix}"
+      TMDB_READ_TOKEN: "${TMDB_READ_TOKEN:-}"
+      DATA_DIR: "/data"
+      MEDIA_DIR: "/media/torrents"
+      MEDIA_BUDGET_GB: "${MEDIA_BUDGET_GB:-50}"
+      MIN_FREE_GB: "${MIN_FREE_GB:-10}"
+      FFMPEG_THREADS: "${FFMPEG_THREADS:-2}"
+      # Local CPU AI classifier (private internal Docker network only)
+      AI_API_URL: "${AI_API_URL:-http://llama-server:8080/v1}"
+      AI_MODEL: "${AI_MODEL:-Qwen2.5-1.5B-Instruct}"
+      AI_TIMEOUT_SEC: "${AI_TIMEOUT_SEC:-12}"
+      # Optional built-in indexer mirror overrides
+      YTS_API_URL: "${YTS_API_URL:-https://movies-api.accel.li/api/v2/}"
+      EZTV_API_URL: "${EZTV_API_URL:-https://eztvx.to/api/get-torrents}"
+      KNABEN_API_URL: "${KNABEN_API_URL:-https://api.knaben.org/v1}"
+      APIBAY_API_URL: "${APIBAY_API_URL:-https://apibay.org}"
+      NYAA_API_URL: "${NYAA_API_URL:-https://nyaa.si}"
+      # Optional custom Torznab & TV online subtitle keys (also editable in Settings UI)
+      TORZNAB_URL: "${TORZNAB_URL:-}"
+      TORZNAB_API_KEY: "${TORZNAB_API_KEY:-}"
+      SUBDL_API_KEY: "${SUBDL_API_KEY:-}"
+      OPENSUBTITLES_API_KEY: "${OPENSUBTITLES_API_KEY:-}"
+    volumes:
+      - /var/lib/bigflix/data:/data
+      - /var/lib/bigflix/media:/media
+    depends_on:
+      - llama-server
+    networks:
+      - dokploy-network
+      - bigflix-net
+
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    restart: unless-stopped
+    environment:
+      LLAMA_CACHE: "/root/.cache/llama.cpp"
+    # Pulls and caches Qwen2.5-1.5B-Instruct Q4_K_M (~1.1 GB) on first boot.
+    command:
+      - "-hf"
+      - "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M"
+      - "--alias"
+      - "Qwen2.5-1.5B-Instruct"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--threads"
+      - "2"
+      - "--ctx-size"
+      - "4096"
+      - "--parallel"
+      - "1"
+    mem_limit: 3g
+    volumes:
+      - llama_cache:/root/.cache/llama.cpp
+    networks:
+      - bigflix-net
+
+volumes:
+  llama_cache:
+
+networks:
+  dokploy-network:
+    external: true
+  bigflix-net:
+    driver: bridge
