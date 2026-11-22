@@ -301,3 +301,22 @@ func TestParseEpisodeFilenameNestedSeasonAndExtrasExclusion(t *testing.T) {
 		t.Fatal("expected HasExplicitSxxExx false for sample/bonus")
 	}
 }
+
+func TestRankPrioritizesHEVCOverH264(t *testing.T) {
+	q := sources.Query{MediaType: "movie", Title: "Dune", Year: 2021, OriginalLanguage: "en"}
+	raw := []sources.RawTorrent{
+		{Hash: strings.Repeat("1", 40), Title: "Dune.2021.1080p.BluRay.x264.AAC", Provider: "apibay", Seeds: 80, SizeBytes: 2_000_000_000},
+		{Hash: strings.Repeat("2", 40), Title: "Dune.2021.1080p.BluRay.x265.10bit.AAC", Provider: "apibay", Seeds: 80, SizeBytes: 2_000_000_000},
+		{Hash: strings.Repeat("3", 40), Title: "Dune.2021.1080p.DV.HDR.WEB-DL.HEVC.AAC", Provider: "apibay", Seeds: 80, SizeBytes: 2_000_000_000},
+	}
+	got := Rank(q, raw, database.DefaultPlaybackPrefs())
+	if len(got) != 3 {
+		t.Fatalf("expected 3 candidates, got %d", len(got))
+	}
+	if got[0].Hash != strings.Repeat("2", 40) || !got[0].BrowserFriendly {
+		t.Fatalf("expected clean HEVC x265 ranked #1 and browser-friendly, got %+v", got)
+	}
+	if got[1].Hash != strings.Repeat("1", 40) {
+		t.Fatalf("expected H.264 ranked #2 above DV HEVC, got %+v", got)
+	}
+}

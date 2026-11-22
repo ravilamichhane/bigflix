@@ -459,7 +459,7 @@ export function SettingsPage({ navigate, onLock }: SettingsPageProps) {
                 checked={preferDirectPlay}
                 onChange={(e) => setPreferDirectPlay(e.target.checked)}
               />
-              <span>Prefer browser-friendly H.264/AAC (low VPS CPU)</span>
+              <span>Prefer direct-play HEVC / H.264 (low VPS CPU, avoid DV/REMUX)</span>
             </label>
             <label className="iface-check">
               <input

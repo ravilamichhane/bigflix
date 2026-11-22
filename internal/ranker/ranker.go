@@ -382,19 +382,23 @@ func Rank(q sources.Query, raw []sources.RawTorrent, prefs database.PlaybackPref
 		// 2. Resolution match
 		score += resolutionScore(p.Resolution, prefs.TargetQuality)
 
-		// 3. Browser / 4 vCPU VPS friendliness
+		// 3. Codec priority (prioritize HEVC/x265 for better quality-per-byte & faster streaming)
+		//    and browser / 4 vCPU VPS direct-play friendliness.
 		browserFriendly := isBrowserFriendly(p, r.Provider)
+		if p.Codec == "hevc" && !p.IsDolbyVision {
+			score += 14
+		} else if p.Codec == "h264" {
+			score += 4
+		}
 		if prefs.PreferDirectPlay {
 			if browserFriendly {
-				score += 20
+				score += 14
 				notes = append(notes, "direct-play friendly")
-			} else if p.Codec == "hevc" && p.BitDepth == 8 && !p.IsDolbyVision {
-				score += 4
 			} else {
 				score -= 8
 			}
 			if p.IsDolbyVision {
-				score -= 14
+				score -= 18
 			}
 			if p.Codec == "av1" {
 				score -= 10
@@ -494,7 +498,7 @@ func Rank(q sources.Query, raw []sources.RawTorrent, prefs database.PlaybackPref
 			}
 		}
 
-		if r.Provider == "yts" && p.Codec != "hevc" && prefs.PreferDirectPlay {
+		if r.Provider == "yts" && !p.IsDolbyVision && prefs.PreferDirectPlay {
 			score += 6
 		}
 
@@ -646,13 +650,16 @@ func isBrowserFriendly(p ParsedRelease, provider string) bool {
 	if p.IsDolbyVision || p.Codec == "av1" || p.Codec == "xvid" || p.Source == "REMUX" {
 		return false
 	}
+	if p.Codec == "hevc" {
+		return true
+	}
 	if p.Codec == "h264" && p.BitDepth <= 8 {
 		return true
 	}
-	if provider == "yts" && p.Codec != "hevc" && p.Resolution != "2160p" {
+	if provider == "yts" {
 		return true
 	}
-	if p.Container == "mp4" && p.Codec != "hevc" {
+	if p.Container == "mp4" {
 		return true
 	}
 	return false

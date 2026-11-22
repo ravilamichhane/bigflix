@@ -438,7 +438,7 @@ func (a *App) resolveInternal(ctx context.Context, meta mediaMeta, forceRefresh 
 		aiEnabled = aiCfg.Enabled && strings.TrimSpace(aiCfg.APIURL) != ""
 	}
 	mediaKey := database.MediaKey(meta.Query.MediaType, meta.Query.TMDBID, meta.Query.Season, meta.Query.Episode)
-	cacheKey := fmt.Sprintf("resolved:v5:%s:%s:%v:%s:%v", mediaKey, prefs.TargetQuality, prefs.PreferDirectPlay, prefs.PreferredLanguage, aiEnabled)
+	cacheKey := fmt.Sprintf("resolved:v6:%s:%s:%v:%s:%v", mediaKey, prefs.TargetQuality, prefs.PreferDirectPlay, prefs.PreferredLanguage, aiEnabled)
 
 	if !forceRefresh && a.store != nil {
 		if b, at, err := a.store.Get(ctx, cacheKey); err == nil && time.Since(at) < 6*time.Hour {

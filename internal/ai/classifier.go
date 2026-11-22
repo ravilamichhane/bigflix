@@ -249,18 +249,18 @@ func (c *Classifier) RankCandidates(ctx context.Context, q sources.Query, prefs 
 		fmt.Fprintf(&sb, "Target Movie: %q (orig: %q, year: %d, lang: %s)\n",
 			q.Title, q.OriginalTitle, q.Year, q.OriginalLanguage)
 	}
-	fmt.Fprintf(&sb, "Prefs: quality=%s h264=%v lang=%s\nCandidates:\n",
+	fmt.Fprintf(&sb, "Prefs: quality=%s direct=%v lang=%s\nCandidates:\n",
 		prefs.TargetQuality, prefs.PreferDirectPlay, prefs.PreferredLanguage)
 	for i := 0; i < topN; i++ {
 		cand := candidates[i]
 		imdbVerified := (cand.Provider == "yts" || cand.Provider == "eztv") && q.IMDbID != ""
-		fmt.Fprintf(&sb, "[%d] prov=%s imdb=%v seeds=%d size=%s src=%s pack=%v h264=%v %q\n",
-			i, cand.Provider, imdbVerified, cand.Seeds, cand.Size, cand.SourceType, cand.IsSeasonPack, cand.BrowserFriendly, cand.Title)
+		fmt.Fprintf(&sb, "[%d] prov=%s imdb=%v codec=%s seeds=%d size=%s src=%s pack=%v direct=%v %q\n",
+			i, cand.Provider, imdbVerified, cand.Codec, cand.Seeds, cand.Size, cand.SourceType, cand.IsSeasonPack, cand.BrowserFriendly, cand.Title)
 	}
 
 	systemPrompt := `Rank pre-filtered torrent IDs best-to-worst in ranked_ids for a 4-vCPU streaming server.
-Prefer matching quality, healthy seeds, smaller size at equal quality, and h264=true when h264 pref is true.
-Never reject imdb=true or matching titles for x265/2160p/720p/HDRip/HDTV/missing lang — just rank lower. Match non-Latin orig against romanized target title.
+Prioritize HEVC/x265 (non-DV) releases first, then H.264; prefer matching quality, healthy seeds, smaller size at equal quality, and direct=true when direct pref is true.
+Never reject imdb=true or matching titles for codec/resolution/HDRip/HDTV/missing lang — just rank lower. Match non-Latin orig against romanized target title.
 Reject ONLY clear wrong titles (e.g. target only in release group), samples/extras/manga, wrong season/episode, or conflicting single-language dubs. Keep note <= 10 words. Return JSON only.`
 
 	schema := map[string]any{
