@@ -1,10 +1,12 @@
 package web
 
 import (
+	"bigflix/internal/ai"
 	"bigflix/internal/catalog"
 	"bigflix/internal/database"
 	"bigflix/internal/downloads"
 	"bigflix/internal/gen/bigflix/v1/bigflixv1connect"
+	"bigflix/internal/sources"
 	"context"
 	"crypto/subtle"
 	"embed"
@@ -26,12 +28,14 @@ import (
 var assets embed.FS
 
 type App struct {
-	restart func()
-	engine  *downloads.Manager
-	service *catalog.Service
-	store   *database.Store
-	tokenMu sync.RWMutex
-	token   string
+	restart    func()
+	engine     *downloads.Manager
+	service    *catalog.Service
+	store      *database.Store
+	aggregator *sources.Aggregator
+	classifier *ai.Classifier
+	tokenMu    sync.RWMutex
+	token      string
 }
 
 func New(service *catalog.Service, engines ...*downloads.Manager) (http.Handler, error) {
@@ -59,12 +63,43 @@ func NewWithRestart(service *catalog.Service, engine *downloads.Manager, restart
 			token = saved
 		}
 	}
+	agg := sources.NewAggregator(store)
+	cl := ai.NewClassifier(store)
+	if engine != nil {
+		engine.SetFileMapper(func(ctx context.Context, seriesTitle string, targetSeason int, files []downloads.VideoFile) ([]downloads.EpisodeFile, error) {
+			entries := make([]ai.FileEntry, 0, len(files))
+			byIdx := map[int]downloads.VideoFile{}
+			for _, f := range files {
+				entries = append(entries, ai.FileEntry{Index: f.Index, Path: f.Name, Size: f.Size})
+				byIdx[f.Index] = f
+			}
+			mapped, err := cl.MapSeasonPackFiles(ctx, seriesTitle, targetSeason, entries)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]downloads.EpisodeFile, 0, len(mapped))
+			for _, m := range mapped {
+				if vf, ok := byIdx[m.FileIndex]; ok {
+					out = append(out, downloads.EpisodeFile{
+						FileIndex: m.FileIndex,
+						Season:    m.Season,
+						Episode:   m.Episode,
+						Name:      vf.Name,
+						Size:      vf.Size,
+					})
+				}
+			}
+			return out, nil
+		})
+	}
 	a := &App{
-		service: service,
-		engine:  engine,
-		restart: restart,
-		store:   store,
-		token:   token,
+		service:    service,
+		engine:     engine,
+		restart:    restart,
+		store:      store,
+		aggregator: agg,
+		classifier: cl,
+		token:      token,
 	}
 	mux := http.NewServeMux()
 	rpcPath, rpcHandler := bigflixv1connect.NewBigflixServiceHandler(
@@ -75,7 +110,11 @@ func NewWithRestart(service *catalog.Service, engine *downloads.Manager, restart
 		if strings.HasSuffix(r.URL.Path, "/WatchDownload") ||
 			strings.HasSuffix(r.URL.Path, "/ProbeMedia") ||
 			strings.HasSuffix(r.URL.Path, "/AddSubtitle") ||
-			strings.HasSuffix(r.URL.Path, "/ListSubtitles") {
+			strings.HasSuffix(r.URL.Path, "/ListSubtitles") ||
+			strings.HasSuffix(r.URL.Path, "/ResolveSources") ||
+			strings.HasSuffix(r.URL.Path, "/StartPlayback") ||
+			strings.HasSuffix(r.URL.Path, "/SwitchSource") ||
+			strings.HasSuffix(r.URL.Path, "/TestAIConnection") {
 			controller := http.NewResponseController(w)
 			_ = controller.SetWriteDeadline(time.Time{})
 		}

@@ -17,6 +17,10 @@ type SubtitleFile struct {
 }
 
 func (m *Manager) SubtitleFiles(hash string) []SubtitleFile {
+	return m.SubtitleFilesForFile(hash, -1)
+}
+
+func (m *Manager) SubtitleFilesForFile(hash string, fileIndex int) []SubtitleFile {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []SubtitleFile{}
@@ -24,12 +28,29 @@ func (m *Manager) SubtitleFiles(hash string) []SubtitleFile {
 	if j == nil || j.t.Info() == nil {
 		return out
 	}
-	for i, f := range j.t.Files() {
+	var targetStem string
+	if fileIndex < 0 {
+		fileIndex = j.record.FileIndex
+	}
+	files := j.t.Files()
+	if fileIndex >= 0 && fileIndex < len(files) {
+		base := filepath.Base(files[fileIndex].Path())
+		targetStem = strings.ToLower(strings.TrimSuffix(base, filepath.Ext(base)))
+	}
+	var matched, rest []SubtitleFile
+	for i, f := range files {
 		ext := strings.ToLower(filepath.Ext(f.Path()))
 		if (ext == ".srt" || ext == ".vtt") && f.Length() > 0 && f.Length() <= subtitles.MaxSize {
-			out = append(out, SubtitleFile{i, f.DisplayPath()})
+			sf := SubtitleFile{i, f.DisplayPath()}
+			if targetStem != "" && strings.Contains(strings.ToLower(f.DisplayPath()), targetStem) {
+				matched = append(matched, sf)
+			} else {
+				rest = append(rest, sf)
+			}
 		}
 	}
+	out = append(out, matched...)
+	out = append(out, rest...)
 	return out
 }
 func (m *Manager) ReadSubtitle(ctx context.Context, hash string, index int) (string, []byte, error) {

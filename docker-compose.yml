@@ -1,0 +1,90 @@
+# Bigflix + Local CPU AI Classifier stack tuned for a 4 vCPU VPS (e.g. Hostinger KVM 4).
+#
+# Quick start:
+#   1. cp .env.example .env   # set AUTH_TOKEN and TMDB_READ_TOKEN (or configure TMDB in Settings UI)
+#   2. docker compose up -d --build
+#   3. Open http://<your-vps-ip>:3000
+#
+# CPU budget on 4 vCPUs:
+#   - llama-server is pinned to 2 threads (--threads 2 --parallel 1) and serialized to 1 request at a time.
+#   - FFmpeg transcoding is capped to 2 threads (FFMPEG_THREADS=2) and the ranker favors direct-play H.264.
+#
+# Privacy note for VPS hosting:
+#   Consider routing torrent traffic through a WireGuard VPN (e.g. Gluetun) and binding Bigflix to that
+#   VPN interface (wg0/tun0) in Settings -> Network interfaces.
+
+services:
+  bigflix:
+    build: .
+    container_name: bigflix
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+      - "${TORRENT_LISTEN_PORT:-51413}:51413/tcp"
+      - "${TORRENT_LISTEN_PORT:-51413}:51413/udp"
+    environment:
+      PORT: "3000"
+      BIND_ADDR: "0.0.0.0"
+      AUTH_TOKEN: "${AUTH_TOKEN:-bigflix}"
+      TMDB_READ_TOKEN: "${TMDB_READ_TOKEN:-}"
+      DATA_DIR: "/data"
+      MEDIA_DIR: "/media/torrents"
+      MEDIA_BUDGET_GB: "${MEDIA_BUDGET_GB:-50}"
+      MIN_FREE_GB: "${MIN_FREE_GB:-10}"
+      FFMPEG_THREADS: "${FFMPEG_THREADS:-2}"
+      # Local CPU AI classifier (internal Docker network only)
+      AI_API_URL: "${AI_API_URL:-http://llama-server:8080/v1}"
+      AI_MODEL: "${AI_MODEL:-Qwen2.5-1.5B-Instruct}"
+      AI_TIMEOUT_SEC: "${AI_TIMEOUT_SEC:-12}"
+      # Optional built-in indexer mirror overrides
+      YTS_API_URL: "${YTS_API_URL:-https://movies-api.accel.li/api/v2/}"
+      EZTV_API_URL: "${EZTV_API_URL:-https://eztvx.to/api/get-torrents}"
+      KNABEN_API_URL: "${KNABEN_API_URL:-https://api.knaben.org/v1}"
+      APIBAY_API_URL: "${APIBAY_API_URL:-https://apibay.org}"
+      NYAA_API_URL: "${NYAA_API_URL:-https://nyaa.si}"
+      # Optional custom Torznab & TV online subtitle keys (also editable in Settings UI)
+      TORZNAB_URL: "${TORZNAB_URL:-}"
+      TORZNAB_API_KEY: "${TORZNAB_API_KEY:-}"
+      SUBDL_API_KEY: "${SUBDL_API_KEY:-}"
+      OPENSUBTITLES_API_KEY: "${OPENSUBTITLES_API_KEY:-}"
+    volumes:
+      - ./data:/data
+      - ./media:/media
+    depends_on:
+      - llama-server
+    networks:
+      - bigflix-net
+
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: bigflix-llama
+    restart: unless-stopped
+    # Pulls and caches Qwen2.5-1.5B-Instruct Q4_K_M (~1.1 GB) on first boot.
+    # For stronger multilingual/anime reasoning on 8+ GB RAM VPS, swap to Qwen2.5-3B-Instruct-GGUF:Q4_K_M.
+    command:
+      - "-hf"
+      - "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M"
+      - "--alias"
+      - "Qwen2.5-1.5B-Instruct"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--threads"
+      - "2"
+      - "--ctx-size"
+      - "4096"
+      - "--parallel"
+      - "1"
+    mem_limit: 3g
+    volumes:
+      - llama_cache:/root/.cache/llama.cpp
+    networks:
+      - bigflix-net
+
+volumes:
+  llama_cache:
+
+networks:
+  bigflix-net:
+    driver: bridge

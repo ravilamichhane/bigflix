@@ -10,13 +10,8 @@ export interface BrowseSearch {
   page?: number;
 }
 
-function BrowseRouteComponent() {
-  const search = useRouterState({ select: (s) => s.location.searchStr });
-  return <BrowsePage search={search} navigate={navigateTo} />;
-}
-
-export const Route = createFileRoute("/")({
-  validateSearch: (search: Record<string, unknown>): BrowseSearch => ({
+export function validateBrowseSearch(search: Record<string, unknown>): BrowseSearch {
+  return {
     feed: typeof search.feed === "string" ? search.feed : undefined,
     q: typeof search.q === "string" ? search.q : undefined,
     genre: typeof search.genre === "string" ? search.genre : undefined,
@@ -25,6 +20,15 @@ export const Route = createFileRoute("/")({
       search.page !== undefined && Number(search.page) > 0
         ? Number(search.page)
         : undefined,
-  }),
-  component: BrowseRouteComponent,
+  };
+}
+
+function DiscoverRouteComponent() {
+  const search = useRouterState({ select: (s) => s.location.searchStr });
+  return <BrowsePage mode="discover" search={search} navigate={navigateTo} />;
+}
+
+export const Route = createFileRoute("/")({
+  validateSearch: validateBrowseSearch,
+  component: DiscoverRouteComponent,
 });

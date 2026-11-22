@@ -276,3 +276,69 @@ export function ChevronDownIcon(props: IconProps) {
     </Svg>
   );
 }
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </Svg>
+  );
+}
+
+export function FilmIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="2.5" y="4" width="19" height="16" rx="2" />
+      <path d="M7 4v16" />
+      <path d="M17 4v16" />
+      <path d="M2.5 8h4.5" />
+      <path d="M2.5 12h19" />
+      <path d="M2.5 16h4.5" />
+      <path d="M17 8h4.5" />
+      <path d="M17 16h4.5" />
+    </Svg>
+  );
+}
+
+export function TvIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="2.5" y="7" width="19" height="13" rx="2.5" />
+      <path d="m17 2-5 5-5-5" />
+    </Svg>
+  );
+}
+
+export function SlidersIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 21v-7" />
+      <path d="M4 10V3" />
+      <path d="M12 21v-9" />
+      <path d="M12 8V3" />
+      <path d="M20 21v-5" />
+      <path d="M20 12V3" />
+      <path d="M2 14h4" />
+      <path d="M10 8h4" />
+      <path d="M18 16h4" />
+    </Svg>
+  );
+}
+
+export function SkipNextIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <polygon points="5 4 15 12 5 20 5 4" fill="currentColor" stroke="none" />
+      <line x1="19" y1="5" x2="19" y2="19" />
+    </Svg>
+  );
+}
+
+export function SkipPrevIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <polygon points="19 20 9 12 19 4 19 20" fill="currentColor" stroke="none" />
+      <line x1="5" y1="19" x2="5" y2="5" />
+    </Svg>
+  );
+}

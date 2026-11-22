@@ -114,3 +114,61 @@ func TestPublicClientBlocksLoopback(t *testing.T) {
 		t.Fatal("private destination allowed")
 	}
 }
+
+func TestTMDBBrowseSeriesSeasonAndDynamicToken(t *testing.T) {
+	s := testService(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer live-db-token" {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		switch r.URL.Path {
+		case "/trending/all/day":
+			fmt.Fprint(w, `{"total_results":3,"results":[
+				{"id":10,"media_type":"movie","title":"Arrival","release_date":"2016-11-11","vote_average":7.9,"poster_path":"/arr.jpg"},
+				{"id":20,"media_type":"tv","name":"Severance","first_air_date":"2022-02-18","vote_average":8.4,"poster_path":"/sev.jpg"},
+				{"id":30,"media_type":"person","name":"Actor"}
+			]}`)
+		case "/tv/20":
+			fmt.Fprint(w, `{"id":20,"name":"Severance","first_air_date":"2022-02-18","status":"Returning Series","number_of_seasons":2,"number_of_episodes":19,"external_ids":{"imdb_id":"tt11280740"},"seasons":[{"season_number":0,"name":"Specials","episode_count":1},{"season_number":2,"name":"Season 2","episode_count":10},{"season_number":1,"name":"Season 1","episode_count":9}]}`)
+		case "/tv/20/season/1":
+			fmt.Fprint(w, `{"season_number":1,"name":"Season 1","episodes":[{"season_number":1,"episode_number":1,"name":"Good News About Hell","runtime":57,"still_path":"/ep1.jpg"}]}`)
+		case "/find/tt11280740":
+			fmt.Fprint(w, `{"tv_results":[{"id":20,"name":"Severance","first_air_date":"2022-02-18"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	s.tmdb = s.base
+	if s.HasTMDB() {
+		t.Fatal("expected TMDB unconfigured initially")
+	}
+	if err := s.SetTMDBToken(context.Background(), "live-db-token"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.HasTMDB() {
+		t.Fatal("expected TMDB configured after SetTMDBToken")
+	}
+
+	feed, err := s.Browse(context.Background(), "all", "trending", "", "", "", 1)
+	if err != nil || len(feed.Items) != 2 {
+		t.Fatalf("expected 2 non-person items, got %+v err=%v", feed, err)
+	}
+	if feed.Items[0].MediaType != "movie" || feed.Items[1].MediaType != "tv" || feed.Items[1].Year != 2022 {
+		t.Fatalf("unexpected browse items: %+v", feed.Items)
+	}
+
+	series, _, _, err := s.SeriesDetail(context.Background(), 20)
+	if err != nil || series.IMDb != "tt11280740" || len(series.Seasons) != 3 || series.Seasons[0].SeasonNumber != 1 || series.Seasons[2].SeasonNumber != 0 {
+		t.Fatalf("unexpected series detail: %+v err=%v", series, err)
+	}
+
+	season, _, _, err := s.SeasonDetail(context.Background(), 20, 1)
+	if err != nil || len(season.Episodes) != 1 || season.Episodes[0].Name != "Good News About Hell" {
+		t.Fatalf("unexpected season detail: %+v err=%v", season, err)
+	}
+
+	found, err := s.Browse(context.Background(), "all", "", "tt11280740", "", "", 1)
+	if err != nil || len(found.Items) != 1 || found.Items[0].TMDBID != 20 {
+		t.Fatalf("unexpected IMDb lookup: %+v err=%v", found, err)
+	}
+}

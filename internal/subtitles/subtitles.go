@@ -79,6 +79,9 @@ func Normalize(b []byte) ([]byte, error) {
 	return []byte(out.String()), nil
 }
 func Save(ctx context.Context, db *database.Store, hash, label, language string, b []byte) (database.Subtitle, error) {
+	return SaveForFile(ctx, db, hash, -1, label, language, b)
+}
+func SaveForFile(ctx context.Context, db *database.Store, hash string, fileIndex int, label, language string, b []byte) (database.Subtitle, error) {
 	if !ValidLanguage(language) {
 		return database.Subtitle{}, errors.New("choose a valid subtitle language")
 	}
@@ -91,5 +94,5 @@ func Save(ctx context.Context, db *database.Store, hash, label, language string,
 	}
 	sum := sha256.Sum256(append([]byte(language+"\n"), vtt...))
 	sub := database.Subtitle{ID: hex.EncodeToString(sum[:]), Label: label, Language: language}
-	return sub, db.SaveSubtitle(ctx, hash, sub, vtt)
+	return sub, db.SaveSubtitleForFile(ctx, hash, fileIndex, sub, vtt)
 }

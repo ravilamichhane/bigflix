@@ -8,10 +8,24 @@ service BigflixService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   rpc UpdateAuthToken(UpdateAuthTokenRequest) returns (UpdateAuthTokenResponse);
 
+  // Legacy movie RPCs (retained for compatibility)
   rpc ListMovies(ListMoviesRequest) returns (ListMoviesResponse);
   rpc GetMovie(GetMovieRequest) returns (GetMovieResponse);
   rpc FindSources(FindSourcesRequest) returns (FindSourcesResponse);
 
+  // Unified TMDB-first catalog (Movies + TV Series)
+  rpc BrowseCatalog(BrowseCatalogRequest) returns (BrowseCatalogResponse);
+  rpc GetMovieDetail(GetMovieDetailRequest) returns (GetMovieDetailResponse);
+  rpc GetSeriesDetail(GetSeriesDetailRequest) returns (GetSeriesDetailResponse);
+  rpc GetSeasonDetail(GetSeasonDetailRequest) returns (GetSeasonDetailResponse);
+  rpc ListContinueWatching(ListContinueWatchingRequest) returns (ListContinueWatchingResponse);
+
+  // Multi-indexer source resolution & 1-click auto-play
+  rpc ResolveSources(ResolveSourcesRequest) returns (ResolveSourcesResponse);
+  rpc StartPlayback(StartPlaybackRequest) returns (StartPlaybackResponse);
+  rpc SwitchSource(SwitchSourceRequest) returns (SwitchSourceResponse);
+
+  // Downloads & streaming
   rpc ListDownloads(ListDownloadsRequest) returns (ListDownloadsResponse);
   rpc GetDownload(GetDownloadRequest) returns (GetDownloadResponse);
   rpc WatchDownload(WatchDownloadRequest) returns (stream WatchDownloadResponse);
@@ -28,6 +42,8 @@ service BigflixService {
 
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   rpc SaveNetworkSettings(SaveNetworkSettingsRequest) returns (SaveNetworkSettingsResponse);
+  rpc SaveAppSettings(SaveAppSettingsRequest) returns (SaveAppSettingsResponse);
+  rpc TestAIConnection(TestAIConnectionRequest) returns (TestAIConnectionResponse);
 }
 
 message GetStatusRequest {}
@@ -118,11 +134,250 @@ message FindSourcesResponse {
   string notice = 3;
 }
 
+// ============================================================================
+// Unified TMDB-first Catalog (Movies & TV Series)
+// ============================================================================
+
+message CatalogItem {
+  int32 tmdb_id = 1;
+  string media_type = 2; // "movie" | "tv"
+  string title = 3;
+  string original_title = 4;
+  int32 year = 5;
+  string release_date = 6;
+  double rating = 7;
+  string overview = 8;
+  string poster = 9;
+  string backdrop = 10;
+  string language = 11;
+  repeated string genres = 12;
+  int32 runtime = 13;
+  string imdb_code = 14;
+  int32 yts_id = 15; // populated only in YTS emergency fallback mode
+}
+
+message BrowseCatalogRequest {
+  string media_type = 1; // "all" | "movie" | "tv"
+  string feed = 2;       // "trending" | "week" | "popular" | "new" | "top_rated" | "yts_fallback"
+  string query = 3;
+  string genre = 4;
+  string sort = 5;
+  int32 page = 6;
+}
+
+message BrowseCatalogResponse {
+  repeated CatalogItem items = 1;
+  int32 count = 2;
+  int32 page = 3;
+  bool has_prev = 4;
+  bool has_next = 5;
+  string heading = 6;
+  string subtitle = 7;
+  string updated_at = 8;
+  bool stale = 9;
+  string notice = 10;
+  bool has_tmdb = 11;
+  string error_message = 12;
+}
+
+message WatchProgressItem {
+  string media_key = 1;
+  string media_type = 2; // "movie" | "episode"
+  int32 tmdb_id = 3;
+  int32 season_number = 4;
+  int32 episode_number = 5;
+  string title = 6;
+  string episode_title = 7;
+  string poster = 8;
+  string backdrop = 9;
+  string last_hash = 10;
+  int32 last_file_index = 11;
+  double position = 12;
+  double duration = 13;
+  bool completed = 14;
+  string updated_at = 15;
+}
+
+message GetMovieDetailRequest {
+  int32 tmdb_id = 1;
+}
+
+message GetMovieDetailResponse {
+  CatalogItem movie = 1;
+  WatchProgressItem progress = 2;
+  string active_download_hash = 3;
+  string updated_at = 4;
+  bool stale = 5;
+}
+
+message SeasonSummary {
+  int32 season_number = 1;
+  string name = 2;
+  int32 episode_count = 3;
+  string air_date = 4;
+  string poster = 5;
+  string overview = 6;
+}
+
+message SeriesDetail {
+  int32 tmdb_id = 1;
+  string imdb_code = 2;
+  string title = 3;
+  string original_title = 4;
+  string first_air_date = 5;
+  int32 year = 6;
+  double rating = 7;
+  string status = 8;
+  repeated string genres = 9;
+  string overview = 10;
+  string poster = 11;
+  string backdrop = 12;
+  string language = 13;
+  int32 season_count = 14;
+  int32 episode_count = 15;
+  repeated SeasonSummary seasons = 16;
+}
+
+message Episode {
+  int32 season_number = 1;
+  int32 episode_number = 2;
+  string name = 3;
+  string overview = 4;
+  string air_date = 5;
+  int32 runtime = 6;
+  string still = 7;
+  double rating = 8;
+  double position = 9;
+  double duration = 10;
+  bool completed = 11;
+  string download_hash = 12;
+  int32 download_file_index = 13;
+}
+
+message NextUpInfo {
+  int32 season_number = 1;
+  int32 episode_number = 2;
+  string episode_title = 3;
+  double position = 4;
+  double duration = 5;
+  bool is_resume = 6;
+}
+
+message GetSeriesDetailRequest {
+  int32 tmdb_id = 1;
+}
+
+message GetSeriesDetailResponse {
+  SeriesDetail series = 1;
+  NextUpInfo next_up = 2;
+  string updated_at = 3;
+  bool stale = 4;
+}
+
+message GetSeasonDetailRequest {
+  int32 tmdb_id = 1;
+  int32 season_number = 2;
+}
+
+message GetSeasonDetailResponse {
+  SeasonSummary season = 1;
+  repeated Episode episodes = 2;
+  string updated_at = 3;
+  bool stale = 4;
+}
+
+message ListContinueWatchingRequest {
+  int32 limit = 1;
+}
+
+message ListContinueWatchingResponse {
+  repeated WatchProgressItem items = 1;
+}
+
+// ============================================================================
+// Multi-Indexer Source Resolution & 1-Click Auto-Play
+// ============================================================================
+
+message SourceCandidate {
+  string hash = 1;
+  string title = 2;
+  string provider = 3;
+  string quality = 4;
+  string source_type = 5;
+  string codec = 6;
+  string audio = 7;
+  string size = 8;
+  int64 size_bytes = 9;
+  int32 seeds = 10;
+  int32 peers = 11;
+  bool is_season_pack = 12;
+  double score = 13;
+  int32 ai_rank = 14;
+  string reason = 15;
+  bool browser_friendly = 16;
+  repeated string languages = 17;
+}
+
+message ResolveSourcesRequest {
+  string media_type = 1; // "movie" | "episode"
+  int32 tmdb_id = 2;
+  int32 season_number = 3;
+  int32 episode_number = 4;
+  bool force_refresh = 5;
+}
+
+message ResolveSourcesResponse {
+  repeated SourceCandidate candidates = 1;
+  string ranked_by = 2; // "ai" | "deterministic"
+  string ai_note = 3;
+  string updated_at = 4;
+  repeated string providers_queried = 5;
+  repeated string warnings = 6;
+}
+
+message StartPlaybackRequest {
+  string media_type = 1; // "movie" | "episode"
+  int32 tmdb_id = 2;
+  int32 season_number = 3;
+  int32 episode_number = 4;
+  bool keep = 5;
+  string override_hash = 6;
+}
+
+message StartPlaybackResponse {
+  DownloadStatus download = 1;
+  int32 file_index = 2;
+  int32 candidate_count = 3;
+  string ranked_by = 4;
+}
+
+message SwitchSourceRequest {
+  string current_hash = 1;
+  string next_hash = 2;
+  bool keep = 3;
+}
+
+message SwitchSourceResponse {
+  DownloadStatus download = 1;
+}
+
+// ============================================================================
+// Downloads, Streaming & Multi-File Season Packs
+// ============================================================================
+
 message VideoFile {
   int32 index = 1;
   string name = 2;
   int64 size = 3;
   bool playable = 4;
+}
+
+message EpisodeFileMap {
+  int32 file_index = 1;
+  int32 season_number = 2;
+  int32 episode_number = 3;
+  string name = 4;
+  int64 size = 5;
 }
 
 message DownloadStatus {
@@ -148,12 +403,29 @@ message DownloadStatus {
   double progress = 20;
   bool playable = 21;
   bool direct = 22;
+
+  // TV, Season Pack & Failover metadata
+  string media_type = 23; // "movie" | "episode"
+  int32 tmdb_id = 24;
+  string imdb_id = 25;
+  int32 season_number = 26;
+  int32 episode_number = 27;
+  string episode_title = 28;
+  string active_source_label = 29;
+  string replaced_by_hash = 30;
+  int32 failover_attempt = 31;
+  int32 failover_total = 32;
+  string failover_note = 33;
+  repeated EpisodeFileMap episode_files = 34;
 }
 
 message ListDownloadsRequest {}
 
 message ListDownloadsResponse {
   repeated DownloadStatus downloads = 1;
+  int64 storage_used_bytes = 2;
+  int64 storage_budget_bytes = 3;
+  bool auto_evict = 4;
 }
 
 message GetDownloadRequest {
@@ -166,6 +438,7 @@ message GetDownloadResponse {
 
 message WatchDownloadRequest {
   string hash = 1;
+  optional int32 file_index = 2;
 }
 
 message WatchDownloadResponse {
@@ -187,6 +460,7 @@ message UpdateDownloadRequest {
   string action = 2;
   int32 file_index = 3;
   double position = 4;
+  double duration = 5;
 }
 
 message UpdateDownloadResponse {
@@ -201,6 +475,16 @@ message DeleteDownloadResponse {}
 
 message ProbeMediaRequest {
   string hash = 1;
+  optional int32 file_index = 2;
+}
+
+message EmbeddedAudioTrack {
+  int32 stream_index = 1;
+  string language = 2;
+  string label = 3;
+  string codec = 4;
+  int32 channels = 5;
+  bool is_default = 6;
 }
 
 message ProbeMediaResponse {
@@ -210,7 +494,12 @@ message ProbeMediaResponse {
   int32 width = 4;
   int32 height = 5;
   string audio = 6;
+  repeated EmbeddedAudioTrack audio_tracks = 7;
 }
+
+// ============================================================================
+// Subtitles
+// ============================================================================
 
 message SubtitleTrack {
   string id = 1;
@@ -240,10 +529,13 @@ message SubtitleSearchResult {
   int32 rating = 4;
   bool hearing_impaired = 5;
   string page = 6;
+  string provider = 7;     // "subdl" | "opensubtitles" | "yify"
+  string download_key = 8; // opaque cached provider download key
 }
 
 message ListSubtitlesRequest {
   string hash = 1;
+  optional int32 file_index = 2;
 }
 
 message ListSubtitlesResponse {
@@ -251,11 +543,13 @@ message ListSubtitlesResponse {
   repeated BundledSubtitleFile bundled = 2;
   bool configured = 3;
   repeated EmbeddedSubtitleTrack embedded = 4;
+  string active_provider = 5;
 }
 
 message GetSubtitleRequest {
   string hash = 1;
   string id = 2;
+  optional int32 file_index = 3;
 }
 
 message GetSubtitleResponse {
@@ -265,10 +559,12 @@ message GetSubtitleResponse {
 message SearchSubtitlesRequest {
   string hash = 1;
   string language = 2;
+  optional int32 file_index = 3;
 }
 
 message SearchSubtitlesResponse {
   repeated SubtitleSearchResult results = 1;
+  string provider = 2;
 }
 
 message AddSubtitleRequest {
@@ -280,11 +576,17 @@ message AddSubtitleRequest {
   int32 index = 6;
   bytes data = 7;
   string filename = 8;
+  optional int32 file_index = 9;
+  string download_key = 10;
 }
 
 message AddSubtitleResponse {
   SubtitleTrack track = 1;
 }
+
+// ============================================================================
+// Settings (Network, TMDB, Indexers, Playback Prefs, Local CPU AI, Subtitles)
+// ============================================================================
 
 message NetworkInterface {
   string name = 1;
@@ -300,6 +602,46 @@ message InterfaceBindingInput {
   int32 port = 2;
 }
 
+message IndexerSetting {
+  string id = 1;
+  string name = 2;
+  bool enabled = 3;
+  string base_url = 4;
+  string health = 5; // "ok" | "degraded" | "idle" | "disabled"
+  string last_error = 6;
+  int32 avg_latency_ms = 7;
+}
+
+message TorznabSetting {
+  bool enabled = 1;
+  string url = 2;
+  bool has_api_key = 3;
+  string api_key = 4; // write-only in SaveAppSettingsRequest
+}
+
+message PlaybackPreferences {
+  string target_quality = 1;     // "720p" | "1080p" | "2160p"
+  bool prefer_direct_play = 2;
+  string preferred_language = 3; // "original" | "en" | ...
+  bool auto_evict = 4;
+}
+
+message AISetting {
+  bool enabled = 1;
+  string api_url = 2;
+  string model = 3;
+  bool has_api_key = 4;
+  string api_key = 5; // write-only in SaveAppSettingsRequest
+  int32 timeout_sec = 6;
+}
+
+message SubtitleProviderSetting {
+  bool has_subdl_key = 1;
+  bool has_opensubtitles_key = 2;
+  string subdl_api_key = 3;         // write-only
+  string opensubtitles_api_key = 4; // write-only
+}
+
 message GetSettingsRequest {}
 
 message GetSettingsResponse {
@@ -310,6 +652,14 @@ message GetSettingsResponse {
   int32 actual_port = 5;
   repeated NetworkInterface interfaces = 6;
   repeated string errors = 7;
+
+  repeated IndexerSetting indexers = 8;
+  TorznabSetting torznab = 9;
+  PlaybackPreferences playback = 10;
+  AISetting ai = 11;
+  SubtitleProviderSetting subtitles = 12;
+  int64 storage_used_bytes = 13;
+  int64 storage_budget_bytes = 14;
 }
 
 message SaveNetworkSettingsRequest {
@@ -321,4 +671,29 @@ message SaveNetworkSettingsRequest {
 
 message SaveNetworkSettingsResponse {
   bool restarting = 1;
+}
+
+message SaveAppSettingsRequest {
+  optional string tmdb_read_token = 1;
+  repeated IndexerSetting indexers = 2;
+  TorznabSetting torznab = 3;
+  PlaybackPreferences playback = 4;
+  AISetting ai = 5;
+  SubtitleProviderSetting subtitles = 6;
+}
+
+message SaveAppSettingsResponse {
+  bool has_tmdb = 1;
+}
+
+message TestAIConnectionRequest {
+  string api_url = 1;
+  string model = 2;
+  string api_key = 3;
+}
+
+message TestAIConnectionResponse {
+  bool ok = 1;
+  string message = 2;
+  int32 latency_ms = 3;
 }

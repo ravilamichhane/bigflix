@@ -47,6 +47,30 @@ const (
 	// BigflixServiceFindSourcesProcedure is the fully-qualified name of the BigflixService's
 	// FindSources RPC.
 	BigflixServiceFindSourcesProcedure = "/bigflix.v1.BigflixService/FindSources"
+	// BigflixServiceBrowseCatalogProcedure is the fully-qualified name of the BigflixService's
+	// BrowseCatalog RPC.
+	BigflixServiceBrowseCatalogProcedure = "/bigflix.v1.BigflixService/BrowseCatalog"
+	// BigflixServiceGetMovieDetailProcedure is the fully-qualified name of the BigflixService's
+	// GetMovieDetail RPC.
+	BigflixServiceGetMovieDetailProcedure = "/bigflix.v1.BigflixService/GetMovieDetail"
+	// BigflixServiceGetSeriesDetailProcedure is the fully-qualified name of the BigflixService's
+	// GetSeriesDetail RPC.
+	BigflixServiceGetSeriesDetailProcedure = "/bigflix.v1.BigflixService/GetSeriesDetail"
+	// BigflixServiceGetSeasonDetailProcedure is the fully-qualified name of the BigflixService's
+	// GetSeasonDetail RPC.
+	BigflixServiceGetSeasonDetailProcedure = "/bigflix.v1.BigflixService/GetSeasonDetail"
+	// BigflixServiceListContinueWatchingProcedure is the fully-qualified name of the BigflixService's
+	// ListContinueWatching RPC.
+	BigflixServiceListContinueWatchingProcedure = "/bigflix.v1.BigflixService/ListContinueWatching"
+	// BigflixServiceResolveSourcesProcedure is the fully-qualified name of the BigflixService's
+	// ResolveSources RPC.
+	BigflixServiceResolveSourcesProcedure = "/bigflix.v1.BigflixService/ResolveSources"
+	// BigflixServiceStartPlaybackProcedure is the fully-qualified name of the BigflixService's
+	// StartPlayback RPC.
+	BigflixServiceStartPlaybackProcedure = "/bigflix.v1.BigflixService/StartPlayback"
+	// BigflixServiceSwitchSourceProcedure is the fully-qualified name of the BigflixService's
+	// SwitchSource RPC.
+	BigflixServiceSwitchSourceProcedure = "/bigflix.v1.BigflixService/SwitchSource"
 	// BigflixServiceListDownloadsProcedure is the fully-qualified name of the BigflixService's
 	// ListDownloads RPC.
 	BigflixServiceListDownloadsProcedure = "/bigflix.v1.BigflixService/ListDownloads"
@@ -86,15 +110,33 @@ const (
 	// BigflixServiceSaveNetworkSettingsProcedure is the fully-qualified name of the BigflixService's
 	// SaveNetworkSettings RPC.
 	BigflixServiceSaveNetworkSettingsProcedure = "/bigflix.v1.BigflixService/SaveNetworkSettings"
+	// BigflixServiceSaveAppSettingsProcedure is the fully-qualified name of the BigflixService's
+	// SaveAppSettings RPC.
+	BigflixServiceSaveAppSettingsProcedure = "/bigflix.v1.BigflixService/SaveAppSettings"
+	// BigflixServiceTestAIConnectionProcedure is the fully-qualified name of the BigflixService's
+	// TestAIConnection RPC.
+	BigflixServiceTestAIConnectionProcedure = "/bigflix.v1.BigflixService/TestAIConnection"
 )
 
 // BigflixServiceClient is a client for the bigflix.v1.BigflixService service.
 type BigflixServiceClient interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
 	UpdateAuthToken(context.Context, *connect.Request[v1.UpdateAuthTokenRequest]) (*connect.Response[v1.UpdateAuthTokenResponse], error)
+	// Legacy movie RPCs (retained for compatibility)
 	ListMovies(context.Context, *connect.Request[v1.ListMoviesRequest]) (*connect.Response[v1.ListMoviesResponse], error)
 	GetMovie(context.Context, *connect.Request[v1.GetMovieRequest]) (*connect.Response[v1.GetMovieResponse], error)
 	FindSources(context.Context, *connect.Request[v1.FindSourcesRequest]) (*connect.Response[v1.FindSourcesResponse], error)
+	// Unified TMDB-first catalog (Movies + TV Series)
+	BrowseCatalog(context.Context, *connect.Request[v1.BrowseCatalogRequest]) (*connect.Response[v1.BrowseCatalogResponse], error)
+	GetMovieDetail(context.Context, *connect.Request[v1.GetMovieDetailRequest]) (*connect.Response[v1.GetMovieDetailResponse], error)
+	GetSeriesDetail(context.Context, *connect.Request[v1.GetSeriesDetailRequest]) (*connect.Response[v1.GetSeriesDetailResponse], error)
+	GetSeasonDetail(context.Context, *connect.Request[v1.GetSeasonDetailRequest]) (*connect.Response[v1.GetSeasonDetailResponse], error)
+	ListContinueWatching(context.Context, *connect.Request[v1.ListContinueWatchingRequest]) (*connect.Response[v1.ListContinueWatchingResponse], error)
+	// Multi-indexer source resolution & 1-click auto-play
+	ResolveSources(context.Context, *connect.Request[v1.ResolveSourcesRequest]) (*connect.Response[v1.ResolveSourcesResponse], error)
+	StartPlayback(context.Context, *connect.Request[v1.StartPlaybackRequest]) (*connect.Response[v1.StartPlaybackResponse], error)
+	SwitchSource(context.Context, *connect.Request[v1.SwitchSourceRequest]) (*connect.Response[v1.SwitchSourceResponse], error)
+	// Downloads & streaming
 	ListDownloads(context.Context, *connect.Request[v1.ListDownloadsRequest]) (*connect.Response[v1.ListDownloadsResponse], error)
 	GetDownload(context.Context, *connect.Request[v1.GetDownloadRequest]) (*connect.Response[v1.GetDownloadResponse], error)
 	WatchDownload(context.Context, *connect.Request[v1.WatchDownloadRequest]) (*connect.ServerStreamForClient[v1.WatchDownloadResponse], error)
@@ -108,6 +150,8 @@ type BigflixServiceClient interface {
 	AddSubtitle(context.Context, *connect.Request[v1.AddSubtitleRequest]) (*connect.Response[v1.AddSubtitleResponse], error)
 	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
 	SaveNetworkSettings(context.Context, *connect.Request[v1.SaveNetworkSettingsRequest]) (*connect.Response[v1.SaveNetworkSettingsResponse], error)
+	SaveAppSettings(context.Context, *connect.Request[v1.SaveAppSettingsRequest]) (*connect.Response[v1.SaveAppSettingsResponse], error)
+	TestAIConnection(context.Context, *connect.Request[v1.TestAIConnectionRequest]) (*connect.Response[v1.TestAIConnectionResponse], error)
 }
 
 // NewBigflixServiceClient constructs a client for the bigflix.v1.BigflixService service. By
@@ -149,6 +193,54 @@ func NewBigflixServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+BigflixServiceFindSourcesProcedure,
 			connect.WithSchema(bigflixServiceMethods.ByName("FindSources")),
+			connect.WithClientOptions(opts...),
+		),
+		browseCatalog: connect.NewClient[v1.BrowseCatalogRequest, v1.BrowseCatalogResponse](
+			httpClient,
+			baseURL+BigflixServiceBrowseCatalogProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("BrowseCatalog")),
+			connect.WithClientOptions(opts...),
+		),
+		getMovieDetail: connect.NewClient[v1.GetMovieDetailRequest, v1.GetMovieDetailResponse](
+			httpClient,
+			baseURL+BigflixServiceGetMovieDetailProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("GetMovieDetail")),
+			connect.WithClientOptions(opts...),
+		),
+		getSeriesDetail: connect.NewClient[v1.GetSeriesDetailRequest, v1.GetSeriesDetailResponse](
+			httpClient,
+			baseURL+BigflixServiceGetSeriesDetailProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("GetSeriesDetail")),
+			connect.WithClientOptions(opts...),
+		),
+		getSeasonDetail: connect.NewClient[v1.GetSeasonDetailRequest, v1.GetSeasonDetailResponse](
+			httpClient,
+			baseURL+BigflixServiceGetSeasonDetailProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("GetSeasonDetail")),
+			connect.WithClientOptions(opts...),
+		),
+		listContinueWatching: connect.NewClient[v1.ListContinueWatchingRequest, v1.ListContinueWatchingResponse](
+			httpClient,
+			baseURL+BigflixServiceListContinueWatchingProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("ListContinueWatching")),
+			connect.WithClientOptions(opts...),
+		),
+		resolveSources: connect.NewClient[v1.ResolveSourcesRequest, v1.ResolveSourcesResponse](
+			httpClient,
+			baseURL+BigflixServiceResolveSourcesProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("ResolveSources")),
+			connect.WithClientOptions(opts...),
+		),
+		startPlayback: connect.NewClient[v1.StartPlaybackRequest, v1.StartPlaybackResponse](
+			httpClient,
+			baseURL+BigflixServiceStartPlaybackProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("StartPlayback")),
+			connect.WithClientOptions(opts...),
+		),
+		switchSource: connect.NewClient[v1.SwitchSourceRequest, v1.SwitchSourceResponse](
+			httpClient,
+			baseURL+BigflixServiceSwitchSourceProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("SwitchSource")),
 			connect.WithClientOptions(opts...),
 		),
 		listDownloads: connect.NewClient[v1.ListDownloadsRequest, v1.ListDownloadsResponse](
@@ -229,29 +321,51 @@ func NewBigflixServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(bigflixServiceMethods.ByName("SaveNetworkSettings")),
 			connect.WithClientOptions(opts...),
 		),
+		saveAppSettings: connect.NewClient[v1.SaveAppSettingsRequest, v1.SaveAppSettingsResponse](
+			httpClient,
+			baseURL+BigflixServiceSaveAppSettingsProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("SaveAppSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		testAIConnection: connect.NewClient[v1.TestAIConnectionRequest, v1.TestAIConnectionResponse](
+			httpClient,
+			baseURL+BigflixServiceTestAIConnectionProcedure,
+			connect.WithSchema(bigflixServiceMethods.ByName("TestAIConnection")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // bigflixServiceClient implements BigflixServiceClient.
 type bigflixServiceClient struct {
-	getStatus           *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
-	updateAuthToken     *connect.Client[v1.UpdateAuthTokenRequest, v1.UpdateAuthTokenResponse]
-	listMovies          *connect.Client[v1.ListMoviesRequest, v1.ListMoviesResponse]
-	getMovie            *connect.Client[v1.GetMovieRequest, v1.GetMovieResponse]
-	findSources         *connect.Client[v1.FindSourcesRequest, v1.FindSourcesResponse]
-	listDownloads       *connect.Client[v1.ListDownloadsRequest, v1.ListDownloadsResponse]
-	getDownload         *connect.Client[v1.GetDownloadRequest, v1.GetDownloadResponse]
-	watchDownload       *connect.Client[v1.WatchDownloadRequest, v1.WatchDownloadResponse]
-	startDownload       *connect.Client[v1.StartDownloadRequest, v1.StartDownloadResponse]
-	updateDownload      *connect.Client[v1.UpdateDownloadRequest, v1.UpdateDownloadResponse]
-	deleteDownload      *connect.Client[v1.DeleteDownloadRequest, v1.DeleteDownloadResponse]
-	probeMedia          *connect.Client[v1.ProbeMediaRequest, v1.ProbeMediaResponse]
-	listSubtitles       *connect.Client[v1.ListSubtitlesRequest, v1.ListSubtitlesResponse]
-	getSubtitle         *connect.Client[v1.GetSubtitleRequest, v1.GetSubtitleResponse]
-	searchSubtitles     *connect.Client[v1.SearchSubtitlesRequest, v1.SearchSubtitlesResponse]
-	addSubtitle         *connect.Client[v1.AddSubtitleRequest, v1.AddSubtitleResponse]
-	getSettings         *connect.Client[v1.GetSettingsRequest, v1.GetSettingsResponse]
-	saveNetworkSettings *connect.Client[v1.SaveNetworkSettingsRequest, v1.SaveNetworkSettingsResponse]
+	getStatus            *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	updateAuthToken      *connect.Client[v1.UpdateAuthTokenRequest, v1.UpdateAuthTokenResponse]
+	listMovies           *connect.Client[v1.ListMoviesRequest, v1.ListMoviesResponse]
+	getMovie             *connect.Client[v1.GetMovieRequest, v1.GetMovieResponse]
+	findSources          *connect.Client[v1.FindSourcesRequest, v1.FindSourcesResponse]
+	browseCatalog        *connect.Client[v1.BrowseCatalogRequest, v1.BrowseCatalogResponse]
+	getMovieDetail       *connect.Client[v1.GetMovieDetailRequest, v1.GetMovieDetailResponse]
+	getSeriesDetail      *connect.Client[v1.GetSeriesDetailRequest, v1.GetSeriesDetailResponse]
+	getSeasonDetail      *connect.Client[v1.GetSeasonDetailRequest, v1.GetSeasonDetailResponse]
+	listContinueWatching *connect.Client[v1.ListContinueWatchingRequest, v1.ListContinueWatchingResponse]
+	resolveSources       *connect.Client[v1.ResolveSourcesRequest, v1.ResolveSourcesResponse]
+	startPlayback        *connect.Client[v1.StartPlaybackRequest, v1.StartPlaybackResponse]
+	switchSource         *connect.Client[v1.SwitchSourceRequest, v1.SwitchSourceResponse]
+	listDownloads        *connect.Client[v1.ListDownloadsRequest, v1.ListDownloadsResponse]
+	getDownload          *connect.Client[v1.GetDownloadRequest, v1.GetDownloadResponse]
+	watchDownload        *connect.Client[v1.WatchDownloadRequest, v1.WatchDownloadResponse]
+	startDownload        *connect.Client[v1.StartDownloadRequest, v1.StartDownloadResponse]
+	updateDownload       *connect.Client[v1.UpdateDownloadRequest, v1.UpdateDownloadResponse]
+	deleteDownload       *connect.Client[v1.DeleteDownloadRequest, v1.DeleteDownloadResponse]
+	probeMedia           *connect.Client[v1.ProbeMediaRequest, v1.ProbeMediaResponse]
+	listSubtitles        *connect.Client[v1.ListSubtitlesRequest, v1.ListSubtitlesResponse]
+	getSubtitle          *connect.Client[v1.GetSubtitleRequest, v1.GetSubtitleResponse]
+	searchSubtitles      *connect.Client[v1.SearchSubtitlesRequest, v1.SearchSubtitlesResponse]
+	addSubtitle          *connect.Client[v1.AddSubtitleRequest, v1.AddSubtitleResponse]
+	getSettings          *connect.Client[v1.GetSettingsRequest, v1.GetSettingsResponse]
+	saveNetworkSettings  *connect.Client[v1.SaveNetworkSettingsRequest, v1.SaveNetworkSettingsResponse]
+	saveAppSettings      *connect.Client[v1.SaveAppSettingsRequest, v1.SaveAppSettingsResponse]
+	testAIConnection     *connect.Client[v1.TestAIConnectionRequest, v1.TestAIConnectionResponse]
 }
 
 // GetStatus calls bigflix.v1.BigflixService.GetStatus.
@@ -277,6 +391,46 @@ func (c *bigflixServiceClient) GetMovie(ctx context.Context, req *connect.Reques
 // FindSources calls bigflix.v1.BigflixService.FindSources.
 func (c *bigflixServiceClient) FindSources(ctx context.Context, req *connect.Request[v1.FindSourcesRequest]) (*connect.Response[v1.FindSourcesResponse], error) {
 	return c.findSources.CallUnary(ctx, req)
+}
+
+// BrowseCatalog calls bigflix.v1.BigflixService.BrowseCatalog.
+func (c *bigflixServiceClient) BrowseCatalog(ctx context.Context, req *connect.Request[v1.BrowseCatalogRequest]) (*connect.Response[v1.BrowseCatalogResponse], error) {
+	return c.browseCatalog.CallUnary(ctx, req)
+}
+
+// GetMovieDetail calls bigflix.v1.BigflixService.GetMovieDetail.
+func (c *bigflixServiceClient) GetMovieDetail(ctx context.Context, req *connect.Request[v1.GetMovieDetailRequest]) (*connect.Response[v1.GetMovieDetailResponse], error) {
+	return c.getMovieDetail.CallUnary(ctx, req)
+}
+
+// GetSeriesDetail calls bigflix.v1.BigflixService.GetSeriesDetail.
+func (c *bigflixServiceClient) GetSeriesDetail(ctx context.Context, req *connect.Request[v1.GetSeriesDetailRequest]) (*connect.Response[v1.GetSeriesDetailResponse], error) {
+	return c.getSeriesDetail.CallUnary(ctx, req)
+}
+
+// GetSeasonDetail calls bigflix.v1.BigflixService.GetSeasonDetail.
+func (c *bigflixServiceClient) GetSeasonDetail(ctx context.Context, req *connect.Request[v1.GetSeasonDetailRequest]) (*connect.Response[v1.GetSeasonDetailResponse], error) {
+	return c.getSeasonDetail.CallUnary(ctx, req)
+}
+
+// ListContinueWatching calls bigflix.v1.BigflixService.ListContinueWatching.
+func (c *bigflixServiceClient) ListContinueWatching(ctx context.Context, req *connect.Request[v1.ListContinueWatchingRequest]) (*connect.Response[v1.ListContinueWatchingResponse], error) {
+	return c.listContinueWatching.CallUnary(ctx, req)
+}
+
+// ResolveSources calls bigflix.v1.BigflixService.ResolveSources.
+func (c *bigflixServiceClient) ResolveSources(ctx context.Context, req *connect.Request[v1.ResolveSourcesRequest]) (*connect.Response[v1.ResolveSourcesResponse], error) {
+	return c.resolveSources.CallUnary(ctx, req)
+}
+
+// StartPlayback calls bigflix.v1.BigflixService.StartPlayback.
+func (c *bigflixServiceClient) StartPlayback(ctx context.Context, req *connect.Request[v1.StartPlaybackRequest]) (*connect.Response[v1.StartPlaybackResponse], error) {
+	return c.startPlayback.CallUnary(ctx, req)
+}
+
+// SwitchSource calls bigflix.v1.BigflixService.SwitchSource.
+func (c *bigflixServiceClient) SwitchSource(ctx context.Context, req *connect.Request[v1.SwitchSourceRequest]) (*connect.Response[v1.SwitchSourceResponse], error) {
+	return c.switchSource.CallUnary(ctx, req)
 }
 
 // ListDownloads calls bigflix.v1.BigflixService.ListDownloads.
@@ -344,13 +498,35 @@ func (c *bigflixServiceClient) SaveNetworkSettings(ctx context.Context, req *con
 	return c.saveNetworkSettings.CallUnary(ctx, req)
 }
 
+// SaveAppSettings calls bigflix.v1.BigflixService.SaveAppSettings.
+func (c *bigflixServiceClient) SaveAppSettings(ctx context.Context, req *connect.Request[v1.SaveAppSettingsRequest]) (*connect.Response[v1.SaveAppSettingsResponse], error) {
+	return c.saveAppSettings.CallUnary(ctx, req)
+}
+
+// TestAIConnection calls bigflix.v1.BigflixService.TestAIConnection.
+func (c *bigflixServiceClient) TestAIConnection(ctx context.Context, req *connect.Request[v1.TestAIConnectionRequest]) (*connect.Response[v1.TestAIConnectionResponse], error) {
+	return c.testAIConnection.CallUnary(ctx, req)
+}
+
 // BigflixServiceHandler is an implementation of the bigflix.v1.BigflixService service.
 type BigflixServiceHandler interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
 	UpdateAuthToken(context.Context, *connect.Request[v1.UpdateAuthTokenRequest]) (*connect.Response[v1.UpdateAuthTokenResponse], error)
+	// Legacy movie RPCs (retained for compatibility)
 	ListMovies(context.Context, *connect.Request[v1.ListMoviesRequest]) (*connect.Response[v1.ListMoviesResponse], error)
 	GetMovie(context.Context, *connect.Request[v1.GetMovieRequest]) (*connect.Response[v1.GetMovieResponse], error)
 	FindSources(context.Context, *connect.Request[v1.FindSourcesRequest]) (*connect.Response[v1.FindSourcesResponse], error)
+	// Unified TMDB-first catalog (Movies + TV Series)
+	BrowseCatalog(context.Context, *connect.Request[v1.BrowseCatalogRequest]) (*connect.Response[v1.BrowseCatalogResponse], error)
+	GetMovieDetail(context.Context, *connect.Request[v1.GetMovieDetailRequest]) (*connect.Response[v1.GetMovieDetailResponse], error)
+	GetSeriesDetail(context.Context, *connect.Request[v1.GetSeriesDetailRequest]) (*connect.Response[v1.GetSeriesDetailResponse], error)
+	GetSeasonDetail(context.Context, *connect.Request[v1.GetSeasonDetailRequest]) (*connect.Response[v1.GetSeasonDetailResponse], error)
+	ListContinueWatching(context.Context, *connect.Request[v1.ListContinueWatchingRequest]) (*connect.Response[v1.ListContinueWatchingResponse], error)
+	// Multi-indexer source resolution & 1-click auto-play
+	ResolveSources(context.Context, *connect.Request[v1.ResolveSourcesRequest]) (*connect.Response[v1.ResolveSourcesResponse], error)
+	StartPlayback(context.Context, *connect.Request[v1.StartPlaybackRequest]) (*connect.Response[v1.StartPlaybackResponse], error)
+	SwitchSource(context.Context, *connect.Request[v1.SwitchSourceRequest]) (*connect.Response[v1.SwitchSourceResponse], error)
+	// Downloads & streaming
 	ListDownloads(context.Context, *connect.Request[v1.ListDownloadsRequest]) (*connect.Response[v1.ListDownloadsResponse], error)
 	GetDownload(context.Context, *connect.Request[v1.GetDownloadRequest]) (*connect.Response[v1.GetDownloadResponse], error)
 	WatchDownload(context.Context, *connect.Request[v1.WatchDownloadRequest], *connect.ServerStream[v1.WatchDownloadResponse]) error
@@ -364,6 +540,8 @@ type BigflixServiceHandler interface {
 	AddSubtitle(context.Context, *connect.Request[v1.AddSubtitleRequest]) (*connect.Response[v1.AddSubtitleResponse], error)
 	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
 	SaveNetworkSettings(context.Context, *connect.Request[v1.SaveNetworkSettingsRequest]) (*connect.Response[v1.SaveNetworkSettingsResponse], error)
+	SaveAppSettings(context.Context, *connect.Request[v1.SaveAppSettingsRequest]) (*connect.Response[v1.SaveAppSettingsResponse], error)
+	TestAIConnection(context.Context, *connect.Request[v1.TestAIConnectionRequest]) (*connect.Response[v1.TestAIConnectionResponse], error)
 }
 
 // NewBigflixServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -401,6 +579,54 @@ func NewBigflixServiceHandler(svc BigflixServiceHandler, opts ...connect.Handler
 		BigflixServiceFindSourcesProcedure,
 		svc.FindSources,
 		connect.WithSchema(bigflixServiceMethods.ByName("FindSources")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceBrowseCatalogHandler := connect.NewUnaryHandler(
+		BigflixServiceBrowseCatalogProcedure,
+		svc.BrowseCatalog,
+		connect.WithSchema(bigflixServiceMethods.ByName("BrowseCatalog")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceGetMovieDetailHandler := connect.NewUnaryHandler(
+		BigflixServiceGetMovieDetailProcedure,
+		svc.GetMovieDetail,
+		connect.WithSchema(bigflixServiceMethods.ByName("GetMovieDetail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceGetSeriesDetailHandler := connect.NewUnaryHandler(
+		BigflixServiceGetSeriesDetailProcedure,
+		svc.GetSeriesDetail,
+		connect.WithSchema(bigflixServiceMethods.ByName("GetSeriesDetail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceGetSeasonDetailHandler := connect.NewUnaryHandler(
+		BigflixServiceGetSeasonDetailProcedure,
+		svc.GetSeasonDetail,
+		connect.WithSchema(bigflixServiceMethods.ByName("GetSeasonDetail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceListContinueWatchingHandler := connect.NewUnaryHandler(
+		BigflixServiceListContinueWatchingProcedure,
+		svc.ListContinueWatching,
+		connect.WithSchema(bigflixServiceMethods.ByName("ListContinueWatching")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceResolveSourcesHandler := connect.NewUnaryHandler(
+		BigflixServiceResolveSourcesProcedure,
+		svc.ResolveSources,
+		connect.WithSchema(bigflixServiceMethods.ByName("ResolveSources")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceStartPlaybackHandler := connect.NewUnaryHandler(
+		BigflixServiceStartPlaybackProcedure,
+		svc.StartPlayback,
+		connect.WithSchema(bigflixServiceMethods.ByName("StartPlayback")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceSwitchSourceHandler := connect.NewUnaryHandler(
+		BigflixServiceSwitchSourceProcedure,
+		svc.SwitchSource,
+		connect.WithSchema(bigflixServiceMethods.ByName("SwitchSource")),
 		connect.WithHandlerOptions(opts...),
 	)
 	bigflixServiceListDownloadsHandler := connect.NewUnaryHandler(
@@ -481,6 +707,18 @@ func NewBigflixServiceHandler(svc BigflixServiceHandler, opts ...connect.Handler
 		connect.WithSchema(bigflixServiceMethods.ByName("SaveNetworkSettings")),
 		connect.WithHandlerOptions(opts...),
 	)
+	bigflixServiceSaveAppSettingsHandler := connect.NewUnaryHandler(
+		BigflixServiceSaveAppSettingsProcedure,
+		svc.SaveAppSettings,
+		connect.WithSchema(bigflixServiceMethods.ByName("SaveAppSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	bigflixServiceTestAIConnectionHandler := connect.NewUnaryHandler(
+		BigflixServiceTestAIConnectionProcedure,
+		svc.TestAIConnection,
+		connect.WithSchema(bigflixServiceMethods.ByName("TestAIConnection")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/bigflix.v1.BigflixService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case BigflixServiceGetStatusProcedure:
@@ -493,6 +731,22 @@ func NewBigflixServiceHandler(svc BigflixServiceHandler, opts ...connect.Handler
 			bigflixServiceGetMovieHandler.ServeHTTP(w, r)
 		case BigflixServiceFindSourcesProcedure:
 			bigflixServiceFindSourcesHandler.ServeHTTP(w, r)
+		case BigflixServiceBrowseCatalogProcedure:
+			bigflixServiceBrowseCatalogHandler.ServeHTTP(w, r)
+		case BigflixServiceGetMovieDetailProcedure:
+			bigflixServiceGetMovieDetailHandler.ServeHTTP(w, r)
+		case BigflixServiceGetSeriesDetailProcedure:
+			bigflixServiceGetSeriesDetailHandler.ServeHTTP(w, r)
+		case BigflixServiceGetSeasonDetailProcedure:
+			bigflixServiceGetSeasonDetailHandler.ServeHTTP(w, r)
+		case BigflixServiceListContinueWatchingProcedure:
+			bigflixServiceListContinueWatchingHandler.ServeHTTP(w, r)
+		case BigflixServiceResolveSourcesProcedure:
+			bigflixServiceResolveSourcesHandler.ServeHTTP(w, r)
+		case BigflixServiceStartPlaybackProcedure:
+			bigflixServiceStartPlaybackHandler.ServeHTTP(w, r)
+		case BigflixServiceSwitchSourceProcedure:
+			bigflixServiceSwitchSourceHandler.ServeHTTP(w, r)
 		case BigflixServiceListDownloadsProcedure:
 			bigflixServiceListDownloadsHandler.ServeHTTP(w, r)
 		case BigflixServiceGetDownloadProcedure:
@@ -519,6 +773,10 @@ func NewBigflixServiceHandler(svc BigflixServiceHandler, opts ...connect.Handler
 			bigflixServiceGetSettingsHandler.ServeHTTP(w, r)
 		case BigflixServiceSaveNetworkSettingsProcedure:
 			bigflixServiceSaveNetworkSettingsHandler.ServeHTTP(w, r)
+		case BigflixServiceSaveAppSettingsProcedure:
+			bigflixServiceSaveAppSettingsHandler.ServeHTTP(w, r)
+		case BigflixServiceTestAIConnectionProcedure:
+			bigflixServiceTestAIConnectionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -546,6 +804,38 @@ func (UnimplementedBigflixServiceHandler) GetMovie(context.Context, *connect.Req
 
 func (UnimplementedBigflixServiceHandler) FindSources(context.Context, *connect.Request[v1.FindSourcesRequest]) (*connect.Response[v1.FindSourcesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.FindSources is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) BrowseCatalog(context.Context, *connect.Request[v1.BrowseCatalogRequest]) (*connect.Response[v1.BrowseCatalogResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.BrowseCatalog is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) GetMovieDetail(context.Context, *connect.Request[v1.GetMovieDetailRequest]) (*connect.Response[v1.GetMovieDetailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.GetMovieDetail is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) GetSeriesDetail(context.Context, *connect.Request[v1.GetSeriesDetailRequest]) (*connect.Response[v1.GetSeriesDetailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.GetSeriesDetail is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) GetSeasonDetail(context.Context, *connect.Request[v1.GetSeasonDetailRequest]) (*connect.Response[v1.GetSeasonDetailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.GetSeasonDetail is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) ListContinueWatching(context.Context, *connect.Request[v1.ListContinueWatchingRequest]) (*connect.Response[v1.ListContinueWatchingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.ListContinueWatching is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) ResolveSources(context.Context, *connect.Request[v1.ResolveSourcesRequest]) (*connect.Response[v1.ResolveSourcesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.ResolveSources is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) StartPlayback(context.Context, *connect.Request[v1.StartPlaybackRequest]) (*connect.Response[v1.StartPlaybackResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.StartPlayback is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) SwitchSource(context.Context, *connect.Request[v1.SwitchSourceRequest]) (*connect.Response[v1.SwitchSourceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.SwitchSource is not implemented"))
 }
 
 func (UnimplementedBigflixServiceHandler) ListDownloads(context.Context, *connect.Request[v1.ListDownloadsRequest]) (*connect.Response[v1.ListDownloadsResponse], error) {
@@ -598,4 +888,12 @@ func (UnimplementedBigflixServiceHandler) GetSettings(context.Context, *connect.
 
 func (UnimplementedBigflixServiceHandler) SaveNetworkSettings(context.Context, *connect.Request[v1.SaveNetworkSettingsRequest]) (*connect.Response[v1.SaveNetworkSettingsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.SaveNetworkSettings is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) SaveAppSettings(context.Context, *connect.Request[v1.SaveAppSettingsRequest]) (*connect.Response[v1.SaveAppSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.SaveAppSettings is not implemented"))
+}
+
+func (UnimplementedBigflixServiceHandler) TestAIConnection(context.Context, *connect.Request[v1.TestAIConnectionRequest]) (*connect.Response[v1.TestAIConnectionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("bigflix.v1.BigflixService.TestAIConnection is not implemented"))
 }

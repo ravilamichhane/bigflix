@@ -9,6 +9,7 @@ import {
 import { client, errMessage, mediaUrl } from "../api";
 import type {
   DownloadStatus,
+  EmbeddedAudioTrack,
   ProbeMediaResponse,
 } from "../gen/bigflix/v1/bigflix_pb";
 import {
@@ -39,9 +40,11 @@ import { Button } from "./ui";
 
 interface VideoPlayerProps {
   hash: string;
+  fileIndex?: number;
   latest: DownloadStatus | null;
   retrySignal?: number;
   onCodecNoteChange?: (note: string) => void;
+  onNearEnd?: (nearEnd: boolean) => void;
 }
 
 type QualityMode = "auto" | "original" | "2160" | "1440" | "1080" | "720" | "480";
@@ -92,6 +95,24 @@ function buttonLabelForQuality(q: QualityMode, detectedTier: number): string {
   return `${q}p`;
 }
 
+function shortAudioLabel(track: EmbeddedAudioTrack | undefined): string {
+  if (!track) return "Audio";
+  const base = track.label.split(" — ")[0].split(" (")[0].trim();
+  if (!base) return "Audio";
+  return base.length > 16 ? `${base.slice(0, 15)}…` : base;
+}
+
+function audioTrackHint(track: EmbeddedAudioTrack): string {
+  const parts: string[] = [];
+  if (track.codec) parts.push(track.codec.toUpperCase());
+  if (track.channels >= 8) parts.push("7.1");
+  else if (track.channels >= 6) parts.push("5.1");
+  else if (track.channels === 2) parts.push("Stereo");
+  else if (track.channels === 1) parts.push("Mono");
+  if (track.isDefault) parts.push("Default");
+  return parts.join(" · ");
+}
+
 function formatClock(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return "0:00";
   const total = Math.floor(sec);
@@ -116,15 +137,18 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array<Arra
 
 export function VideoPlayer({
   hash,
+  fileIndex,
   latest,
   retrySignal = 0,
   onCodecNoteChange,
+  onNearEnd,
 }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<WebkitVideoElement | null>(null);
   const scrubRef = useRef<HTMLDivElement | null>(null);
   const subBtnRef = useRef<HTMLButtonElement | null>(null);
   const qualityMenuRef = useRef<HTMLDivElement | null>(null);
+  const audioMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -142,6 +166,9 @@ export function VideoPlayer({
   const [rate, setRate] = useState(1);
   const [quality, setQuality] = useState<QualityMode>("original");
   const [qualityOpen, setQualityOpen] = useState(false);
+  const [audioTracks, setAudioTracks] = useState<EmbeddedAudioTrack[]>([]);
+  const [audioStream, setAudioStream] = useState<number | null>(null);
+  const [audioOpen, setAudioOpen] = useState(false);
   const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
@@ -163,6 +190,9 @@ export function VideoPlayer({
   const wantPlayRef = useRef(false);
   const qualityRef = useRef<QualityMode>("original");
   const qualityOpenRef = useRef(false);
+  const audioTracksRef = useRef<EmbeddedAudioTrack[]>([]);
+  const audioStreamRef = useRef<number | null>(null);
+  const audioOpenRef = useRef(false);
   const savedPositionRef = useRef(0);
   const restoredRef = useRef(false);
   const targetTimeRef = useRef(0);
@@ -201,6 +231,10 @@ export function VideoPlayer({
     qualityOpenRef.current = qualityOpen;
   }, [qualityOpen]);
 
+  useEffect(() => {
+    audioOpenRef.current = audioOpen;
+  }, [audioOpen]);
+
   const handleStyleChange = useCallback((next: SubtitleStyle) => {
     setSubtitleStyle(next);
     saveSubtitleStyle(next);
@@ -214,7 +248,12 @@ export function VideoPlayer({
     }
     if (!keepOpen) {
       hideTimerRef.current = window.setTimeout(() => {
-        if (wantPlayRef.current && !scrubbingRef.current && !qualityOpenRef.current) {
+        if (
+          wantPlayRef.current &&
+          !scrubbingRef.current &&
+          !qualityOpenRef.current &&
+          !audioOpenRef.current
+        ) {
           setControlsVisible(false);
         }
       }, 4000);
@@ -273,18 +312,23 @@ export function VideoPlayer({
     return opts;
   }, [detectedTier]);
 
-  // Close quality menu when clicking outside or pressing Escape
+  // Close quality/audio menus when clicking outside or pressing Escape
   useEffect(() => {
-    if (!qualityOpen) return;
+    if (!qualityOpen && !audioOpen) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
+      const node = e.target as Node;
+      const inQuality = Boolean(qualityMenuRef.current?.contains(node));
+      const inAudio = Boolean(audioMenuRef.current?.contains(node));
+      if (!inQuality && !inAudio) {
         setQualityOpen(false);
+        setAudioOpen(false);
         showControls(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setQualityOpen(false);
+        setAudioOpen(false);
         showControls(false);
       }
     };
@@ -294,7 +338,7 @@ export function VideoPlayer({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [qualityOpen, showControls]);
+  }, [qualityOpen, audioOpen, showControls]);
 
   useEffect(() => {
     if (!latest) return;
@@ -329,13 +373,17 @@ export function VideoPlayer({
       }
     }
 
-    // Background probe (also gives exact resolution for 4K/1440p/1080p menu options)
+    // Background probe (gives exact resolution + embedded audio tracks)
     if (isReady && !probePromiseRef.current) {
       const p = client
-        .probeMedia({ hash })
+        .probeMedia({ hash, fileIndex })
         .then((res) => {
           if (res.width > 0 && res.height > 0) {
             setSourceDims({ w: res.width, h: res.height });
+          }
+          if (res.audioTracks.length > 0) {
+            audioTracksRef.current = res.audioTracks;
+            setAudioTracks(res.audioTracks);
           }
           return res;
         })
@@ -346,7 +394,7 @@ export function VideoPlayer({
       probePromiseRef.current = p;
       p.catch(() => {});
     }
-  }, [latest, hash, onCodecNoteChange]);
+  }, [latest, hash, fileIndex, onCodecNoteChange]);
 
   const attemptPlay = useCallback(async () => {
     const video = videoRef.current;
@@ -369,16 +417,26 @@ export function VideoPlayer({
     if (!video || !startedRef.current) return;
     const pos = video.currentTime;
     if (!Number.isFinite(pos) || pos <= 0) return;
-    void client.updateDownload({ hash, action: "progress", position: pos }).catch(() => {});
+    const dur =
+      Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : engineRef.current.info?.duration || 0;
+    void client
+      .updateDownload({ hash, action: "progress", position: pos, duration: dur })
+      .catch(() => {});
   }, [hash]);
 
   const probe = useCallback((): Promise<ProbeMediaResponse> => {
     if (!probePromiseRef.current) {
       probePromiseRef.current = client
-        .probeMedia({ hash })
+        .probeMedia({ hash, fileIndex })
         .then((res) => {
           if (res.width > 0 && res.height > 0) {
             setSourceDims({ w: res.width, h: res.height });
+          }
+          if (res.audioTracks.length > 0) {
+            audioTracksRef.current = res.audioTracks;
+            setAudioTracks(res.audioTracks);
           }
           return res;
         })
@@ -388,10 +446,14 @@ export function VideoPlayer({
         });
     }
     return probePromiseRef.current;
-  }, [hash]);
+  }, [hash, fileIndex]);
 
   const startPlaybackRef = useRef<
-    (fromOverride?: number, qualityOverride?: QualityMode) => Promise<void>
+    (
+      fromOverride?: number,
+      qualityOverride?: QualityMode,
+      audioOverride?: number | null,
+    ) => Promise<void>
   >(async () => {});
 
   // External retry trigger from WatchPage panel
@@ -425,10 +487,15 @@ export function VideoPlayer({
     startedRef.current = false;
     wantPlayRef.current = false;
     qualityRef.current = "original";
+    audioTracksRef.current = [];
+    audioStreamRef.current = null;
     restoredRef.current = false;
     targetTimeRef.current = 0;
     setQuality("original");
     setQualityOpen(false);
+    setAudioTracks([]);
+    setAudioStream(null);
+    setAudioOpen(false);
     setSourceDims(null);
     setActiveCues([]);
     setStarted(false);
@@ -440,12 +507,17 @@ export function VideoPlayer({
     setDuration(0);
     setBufferedEndTime(0);
 
+    const directMediaPath =
+      fileIndex !== undefined ? `/media/${hash}?file=${fileIndex}` : `/media/${hash}`;
+    const remuxFileParam = fileIndex !== undefined ? `&file=${fileIndex}` : "";
+    onNearEnd?.(false);
+
     const MS = window.ManagedMediaSource || window.MediaSource;
     const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
     const mime = (mode: "copy" | "compat") =>
       `video/mp4; codecs="${mode === "copy" ? eng.info?.codecs || "" : "avc1.640033"}${
-        eng.info?.audio ? ", mp4a.40.2" : ""
+        eng.info?.audio || (eng.info?.audioTracks?.length ?? 0) > 0 ? ", mp4a.40.2" : ""
       }"`;
 
     function bufferLimits(): { aheadLimit: number; keepBehind: number } {
@@ -579,7 +651,7 @@ export function VideoPlayer({
         eng.info = await probe();
       } catch {
         restoredRef.current = false;
-        video.src = mediaUrl(`/media/${hash}`);
+        video.src = mediaUrl(directMediaPath);
         video.load();
         if (wantPlayRef.current) void attemptPlay();
         return;
@@ -608,8 +680,12 @@ export function VideoPlayer({
         }
         const maxhParam =
           eng.remux === "compat" && eng.compatMaxH > 0 ? `&maxh=${eng.compatMaxH}` : "";
+        const audioParam =
+          audioStreamRef.current !== null ? `&a=${audioStreamRef.current}` : "";
         const response = await fetch(
-          mediaUrl(`/media/${hash}/remux?mode=${eng.remux}&t=${from.toFixed(3)}${maxhParam}`),
+          mediaUrl(
+            `/media/${hash}/remux?mode=${eng.remux}&t=${from.toFixed(3)}${maxhParam}${audioParam}${remuxFileParam}`,
+          ),
           { signal: eng.abort.signal },
         );
         if (!response.ok || !response.body) {
@@ -795,13 +871,24 @@ export function VideoPlayer({
       video.load();
     }
 
-    async function startPlayback(fromOverride?: number, qualityOverride?: QualityMode) {
+    async function startPlayback(
+      fromOverride?: number,
+      qualityOverride?: QualityMode,
+      audioOverride?: number | null,
+    ) {
       const current = latestRef.current;
       if (!readyRef.current || !current || eng.disposed) return;
 
       const activeQuality = qualityOverride ?? qualityRef.current;
       const numericTier =
         activeQuality === "auto" || activeQuality === "original" ? 0 : Number(activeQuality);
+      const activeAudio =
+        audioOverride !== undefined ? audioOverride : audioStreamRef.current;
+      const defaultStreamIdx = audioTracksRef.current[0]?.streamIndex ?? null;
+      const nonDefaultAudio =
+        activeAudio !== null &&
+        audioTracksRef.current.length > 1 &&
+        activeAudio !== defaultStreamIdx;
 
       wantPlayRef.current = true;
       startedRef.current = true;
@@ -816,8 +903,9 @@ export function VideoPlayer({
         savedPositionRef.current = fromOverride;
       }
 
-      // Direct playback when container is browser-native AND Auto/Original is selected
-      if (current.direct && numericTier === 0) {
+      // Direct playback when container is browser-native, Auto/Original is selected,
+      // AND the default audio track is active (switching embedded audio uses low-CPU remux copy)
+      if (current.direct && numericTier === 0 && !nonDefaultAudio) {
         eng.remux = null;
         eng.compatMaxH = 0;
         eng.session++;
@@ -825,7 +913,7 @@ export function VideoPlayer({
         revokeCurrentUrl();
         onCodecNoteChange?.("Direct browser playback.");
         setStatusText("Buffering…");
-        video.src = mediaUrl(`/media/${hash}`);
+        video.src = mediaUrl(directMediaPath);
         video.load();
         await attemptPlay();
         return;
@@ -839,7 +927,7 @@ export function VideoPlayer({
         if (current.direct) {
           eng.remux = null;
           eng.compatMaxH = 0;
-          video.src = mediaUrl(`/media/${hash}`);
+          video.src = mediaUrl(directMediaPath);
           video.load();
           await attemptPlay();
           return;
@@ -859,13 +947,23 @@ export function VideoPlayer({
         setSourceDims({ w: eng.info.width, h: eng.info.height });
       }
       const label = `${eng.info.video.toUpperCase()} ${eng.info.width}×${eng.info.height}`;
+      const audioParam = activeAudio !== null ? `&a=${activeAudio}` : "";
+      const activeAudioTrack =
+        audioTracksRef.current.find((t) => t.streamIndex === activeAudio) ??
+        audioTracksRef.current[0];
+      const audioNote =
+        activeAudioTrack && audioTracksRef.current.length > 1
+          ? ` · Audio: ${shortAudioLabel(activeAudioTrack)}`
+          : "";
 
       if (!MS) {
         eng.remux = "compat";
         eng.compatMaxH = numericTier || 1080;
         restoredRef.current = true;
-        onCodecNoteChange?.(`${label} · converted on the fly`);
-        video.src = mediaUrl(`/media/${hash}/remux?mode=compat&maxh=${eng.compatMaxH}`);
+        onCodecNoteChange?.(`${label}${audioNote} · converted on the fly`);
+        video.src = mediaUrl(
+          `/media/${hash}/remux?mode=compat&maxh=${eng.compatMaxH}${audioParam}${remuxFileParam}`,
+        );
         video.load();
         await attemptPlay();
         return;
@@ -881,8 +979,8 @@ export function VideoPlayer({
 
       onCodecNoteChange?.(
         eng.remux === "copy"
-          ? `${label} · original quality`
-          : `H.264 stream (≤${eng.compatMaxH}p) from ${label}.`,
+          ? `${label} · original quality${audioNote}`
+          : `H.264 stream (≤${eng.compatMaxH}p) from ${label}${audioNote}.`,
       );
       const from =
         savedPositionRef.current > 0 && savedPositionRef.current < eng.info.duration - 5
@@ -1016,7 +1114,7 @@ export function VideoPlayer({
             setStatusText("Recovering playback…");
             savedPositionRef.current = t;
             restoredRef.current = false;
-            video.src = mediaUrl(`/media/${hash}`);
+            video.src = mediaUrl(directMediaPath);
             video.load();
             void attemptPlay();
           }
@@ -1084,6 +1182,7 @@ export function VideoPlayer({
       setStatusText("Finished");
       showControls(true);
       saveProgress();
+      onNearEnd?.(true);
     };
 
     const onSeeking = () => {
@@ -1118,9 +1217,18 @@ export function VideoPlayer({
     };
 
     let lastSave = 0;
+    let notifiedNearEnd = false;
     const onTimeUpdate = () => {
       if (!scrubbingRef.current) setCurrentTime(video.currentTime);
       updateBufferedUI();
+      const totalDur =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? video.duration
+          : eng.info?.duration || 0;
+      if (!notifiedNearEnd && totalDur > 90 && video.currentTime / totalDur >= 0.92) {
+        notifiedNearEnd = true;
+        onNearEnd?.(true);
+      }
       if (Date.now() - lastSave > 10000) {
         lastSave = Date.now();
         saveProgress();
@@ -1156,7 +1264,7 @@ export function VideoPlayer({
         eng.retryTimer = window.setTimeout(() => {
           if (eng.disposed || !wantPlayRef.current) return;
           restoredRef.current = false;
-          video.src = mediaUrl(`/media/${hash}`);
+          video.src = mediaUrl(directMediaPath);
           video.load();
           void attemptPlay();
         }, eng.directRetries * 1500);
@@ -1232,7 +1340,7 @@ export function VideoPlayer({
       video.removeAttribute("src");
       video.load();
     };
-  }, [attemptPlay, hash, onCodecNoteChange, probe, saveProgress, showControls]);
+  }, [attemptPlay, fileIndex, hash, onCodecNoteChange, onNearEnd, probe, saveProgress, showControls]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -1311,6 +1419,25 @@ export function VideoPlayer({
       if (startedRef.current) {
         const pos = videoRef.current?.currentTime || savedPositionRef.current;
         void startPlaybackRef.current(pos, next);
+      }
+    },
+    [showControls],
+  );
+
+  const selectAudioTrack = useCallback(
+    (streamIndex: number) => {
+      const currentEffective =
+        audioStreamRef.current ?? audioTracksRef.current[0]?.streamIndex ?? null;
+      setAudioOpen(false);
+      showControls(false);
+      if (currentEffective === streamIndex) {
+        return;
+      }
+      audioStreamRef.current = streamIndex;
+      setAudioStream(streamIndex);
+      if (startedRef.current) {
+        const pos = videoRef.current?.currentTime || savedPositionRef.current;
+        void startPlaybackRef.current(pos, qualityRef.current, streamIndex);
       }
     },
     [showControls],
@@ -1424,8 +1551,9 @@ export function VideoPlayer({
   };
 
   const onSurfaceUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (qualityOpen) {
+    if (qualityOpen || audioOpen) {
       setQualityOpen(false);
+      setAudioOpen(false);
       showControls(false);
       return;
     }
@@ -1465,6 +1593,7 @@ export function VideoPlayer({
   const uiOpen =
     controlsVisible ||
     qualityOpen ||
+    audioOpen ||
     !playing ||
     !started ||
     buffering ||
@@ -1472,6 +1601,9 @@ export function VideoPlayer({
   const displayTime = scrubTime ?? currentTime;
   const playedPct = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
   const bufferedPct = duration > 0 ? Math.min(100, (bufferedEndTime / duration) * 100) : 0;
+  const effectiveAudioStream = audioStream ?? audioTracks[0]?.streamIndex ?? null;
+  const activeAudioTrack =
+    audioTracks.find((t) => t.streamIndex === effectiveAudioStream) ?? audioTracks[0];
 
   return (
     <div
@@ -1481,7 +1613,13 @@ export function VideoPlayer({
         if (e.pointerType === "mouse") showControls(false);
       }}
       onPointerLeave={(e) => {
-        if (e.pointerType === "mouse" && playing && !scrubbingRef.current && !qualityOpen) {
+        if (
+          e.pointerType === "mouse" &&
+          playing &&
+          !scrubbingRef.current &&
+          !qualityOpen &&
+          !audioOpen
+        ) {
           setControlsVisible(false);
         }
       }}
@@ -1529,8 +1667,64 @@ export function VideoPlayer({
           {statusText}
         </span>
 
-        <div className="kp-top-actions" ref={qualityMenuRef}>
-          <div className="kp-dropdown">
+        <div className="kp-top-actions">
+          {audioTracks.length > 0 && (
+            <div className="kp-dropdown" ref={audioMenuRef}>
+              <button
+                type="button"
+                className="kp-pill-btn mono"
+                aria-haspopup="menu"
+                aria-expanded={audioOpen}
+                aria-label="Audio track"
+                onClick={() => {
+                  setQualityOpen(false);
+                  setAudioOpen((open) => {
+                    const next = !open;
+                    showControls(next);
+                    return next;
+                  });
+                }}
+              >
+                <VolumeIcon size={13} />
+                <span>{shortAudioLabel(activeAudioTrack)}</span>
+                <ChevronDownIcon size={13} />
+              </button>
+
+              {audioOpen && (
+                <div className="kp-menu" role="menu" aria-label="Select audio track">
+                  {audioTracks.map((tr) => {
+                    const selected = effectiveAudioStream === tr.streamIndex;
+                    const hint = audioTrackHint(tr);
+                    const tag =
+                      tr.language && tr.language !== "und"
+                        ? tr.language.toUpperCase()
+                        : tr.codec.toUpperCase();
+                    return (
+                      <button
+                        key={tr.streamIndex}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={selected}
+                        className={`kp-menu-item ${selected ? "active" : ""}`}
+                        onClick={() => selectAudioTrack(tr.streamIndex)}
+                      >
+                        <span className="kp-menu-check">
+                          {selected && <CheckIcon size={13} />}
+                        </span>
+                        <span className="kp-menu-label">
+                          <strong>{tr.label}</strong>
+                          {hint && <small>{hint}</small>}
+                        </span>
+                        {tag && <span className="kp-menu-tag">{tag}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="kp-dropdown" ref={qualityMenuRef}>
             <button
               type="button"
               className="kp-pill-btn mono"
@@ -1538,6 +1732,7 @@ export function VideoPlayer({
               aria-expanded={qualityOpen}
               aria-label="Resolution"
               onClick={() => {
+                setAudioOpen(false);
                 setQualityOpen((open) => {
                   const next = !open;
                   showControls(next);
@@ -1770,6 +1965,8 @@ export function VideoPlayer({
 
       <SubtitleDialog
         hash={hash}
+        fileIndex={fileIndex ?? (latest && latest.fileIndex >= 0 ? latest.fileIndex : undefined)}
+        isComplete={latest?.state === "complete"}
         video={videoEl}
         openSignal={subOpenSignal}
         nativeFullscreen={nativeFullscreen}

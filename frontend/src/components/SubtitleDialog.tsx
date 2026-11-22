@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { client, errMessage } from "../api";
+import { client, errMessage, mediaUrl } from "../api";
 import type {
   BundledSubtitleFile,
   EmbeddedSubtitleTrack,
@@ -36,6 +36,8 @@ const LANGUAGES = [
 
 interface SubtitleDialogProps {
   hash: string;
+  fileIndex?: number;
+  isComplete?: boolean;
   video: HTMLVideoElement | null;
   openSignal: number;
   nativeFullscreen: boolean;
@@ -44,6 +46,71 @@ interface SubtitleDialogProps {
   onCuesChange: (cues: string[]) => void;
   onCloseFocus?: () => void;
   onActiveChange?: (active: boolean) => void;
+}
+
+interface ParsedCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+const VTT_TIMING_RE =
+  /^(\d{1,3}:\d{2}:\d{2}[.,]\d{3}|\d{2}:\d{2}[.,]\d{3})\s+-->\s+(\d{1,3}:\d{2}:\d{2}[.,]\d{3}|\d{2}:\d{2}[.,]\d{3})/;
+
+function parseVTTTimestamp(raw: string): number {
+  const parts = raw.replace(",", ".").split(":");
+  if (parts.length === 2) {
+    return Number(parts[0]) * 60 + Number(parts[1]);
+  }
+  if (parts.length === 3) {
+    return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
+  }
+  return NaN;
+}
+
+function cleanCueText(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, "")
+    .replace(/\{\\[^}]+\}/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+function drainVTTCues(buffer: string): { cues: ParsedCue[]; rest: string } {
+  const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const blocks = normalized.split("\n\n");
+  const rest = blocks.pop() ?? "";
+  const cues: ParsedCue[] = [];
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length === 0) continue;
+    let timingIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (VTT_TIMING_RE.test(lines[i])) {
+        timingIdx = i;
+        break;
+      }
+    }
+    if (timingIdx < 0) continue;
+    const match = VTT_TIMING_RE.exec(lines[timingIdx]);
+    if (!match) continue;
+    const start = parseVTTTimestamp(match[1]);
+    const end = parseVTTTimestamp(match[2]);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const textLines = lines
+      .slice(timingIdx + 1)
+      .map(cleanCueText)
+      .filter(Boolean);
+    if (textLines.length === 0) continue;
+    cues.push({ start, end, text: textLines.join("\n") });
+  }
+  return { cues, rest };
 }
 
 function readActiveCueTexts(track: TextTrack | undefined): string[] {
@@ -60,6 +127,8 @@ function readActiveCueTexts(track: TextTrack | undefined): string[] {
 
 export function SubtitleDialog({
   hash,
+  fileIndex,
+  isComplete = false,
   video,
   openSignal,
   nativeFullscreen,
@@ -72,6 +141,10 @@ export function SubtitleDialog({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const trackElRef = useRef<HTMLTrackElement | null>(null);
+  const liveTrackRef = useRef<TextTrack | null>(null);
+  const liveAbortRef = useRef<AbortController | null>(null);
+  const liveSeenRef = useRef<Set<string>>(new Set());
+  const liveWindowRef = useRef<{ start: number; maxEnd: number }>({ start: Infinity, maxEnd: -1 });
   const cueListenerCleanupRef = useRef<(() => void) | null>(null);
   const blobUrlRef = useRef<string>("");
   const originalTimesRef = useRef(new WeakMap<TextTrackCue, [number, number]>());
@@ -84,12 +157,14 @@ export function SubtitleDialog({
   const [embedded, setEmbedded] = useState<EmbeddedSubtitleTrack[]>([]);
   const [bundled, setBundled] = useState<BundledSubtitleFile[]>([]);
   const [results, setResults] = useState<SubtitleSearchResult[]>([]);
+  const [activeProvider, setActiveProvider] = useState("Online Subtitles");
   const [status, setStatus] = useState("");
   const [statusError, setStatusError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [extractingStream, setExtractingStream] = useState<number | null>(null);
+  const [liveEmbedded, setLiveEmbedded] = useState<EmbeddedSubtitleTrack | null>(null);
 
-  const prefKey = `bigflix-subtitles-${hash}`;
+  const prefKey = `bigflix-subtitles-${hash}-${fileIndex ?? "default"}`;
   const [preferred, setPreferred] = useState<string>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(prefKey) || "{}");
@@ -106,13 +181,22 @@ export function SubtitleDialog({
       return 0;
     }
   });
+  const offsetRef = useRef(offset);
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
+
+  const activeTextTrack = useCallback((): TextTrack | undefined => {
+    return trackElRef.current?.track || liveTrackRef.current || undefined;
+  }, []);
 
   useEffect(() => {
     nativeFsRef.current = nativeFullscreen;
-    if (trackElRef.current?.track) {
-      trackElRef.current.track.mode = nativeFullscreen ? "showing" : "hidden";
+    const t = activeTextTrack();
+    if (t) {
+      t.mode = nativeFullscreen ? "showing" : "hidden";
     }
-  }, [nativeFullscreen]);
+  }, [nativeFullscreen, activeTextTrack]);
 
   useEffect(() => {
     try {
@@ -138,7 +222,27 @@ export function SubtitleDialog({
     [onCuesChange],
   );
 
+  const stopLiveStream = useCallback(() => {
+    liveAbortRef.current?.abort();
+    liveAbortRef.current = null;
+    if (liveTrackRef.current) {
+      liveTrackRef.current.mode = "disabled";
+      if (liveTrackRef.current.cues) {
+        for (const cue of Array.from(liveTrackRef.current.cues)) {
+          try {
+            liveTrackRef.current.removeCue(cue);
+          } catch {
+            // Ignore removal errors
+          }
+        }
+      }
+    }
+    liveSeenRef.current.clear();
+    liveWindowRef.current = { start: Infinity, maxEnd: -1 };
+  }, []);
+
   const clearTrack = useCallback(() => {
+    stopLiveStream();
     cueListenerCleanupRef.current?.();
     cueListenerCleanupRef.current = null;
     if (trackElRef.current) {
@@ -153,19 +257,146 @@ export function SubtitleDialog({
       blobUrlRef.current = "";
     }
     onCuesChange([]);
-  }, [onCuesChange]);
+  }, [onCuesChange, stopLiveStream]);
+
+  const pumpLiveStream = useCallback(
+    async (item: EmbeddedSubtitleTrack, track: TextTrack, fromSec: number) => {
+      liveAbortRef.current?.abort();
+      const ac = new AbortController();
+      liveAbortRef.current = ac;
+      const startSec = Math.max(0, fromSec);
+      if (startSec < liveWindowRef.current.start) {
+        liveWindowRef.current.start = startSec;
+      }
+
+      const fileParam = fileIndex !== undefined ? `&file=${fileIndex}` : "";
+      const url = mediaUrl(
+        `/media/${hash}/subtitle/${item.streamIndex}?t=${startSec.toFixed(1)}${fileParam}`,
+      );
+      try {
+        const res = await fetch(url, { signal: ac.signal });
+        if (!res.ok || !res.body) {
+          throw new Error((await res.text()) || "Live subtitle stream unavailable");
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buf = "";
+
+        const appendCues = (parsed: ParsedCue[]) => {
+          let hitCurrent = false;
+          const nowT = video?.currentTime ?? -1;
+          const delay = offsetRef.current;
+          for (const c of parsed) {
+            const key = `${c.start.toFixed(3)}|${c.end.toFixed(3)}|${c.text}`;
+            if (liveSeenRef.current.has(key)) continue;
+            liveSeenRef.current.add(key);
+            if (c.end > liveWindowRef.current.maxEnd) {
+              liveWindowRef.current.maxEnd = c.end;
+            }
+            const adjEnd = Math.max(0.001, c.end + delay);
+            const adjStart = Math.max(0, Math.min(c.start + delay, adjEnd - 0.001));
+            try {
+              const cue = new VTTCue(adjStart, adjEnd, c.text);
+              originalTimesRef.current.set(cue, [c.start, c.end]);
+              track.addCue(cue);
+              if (nowT >= adjStart - 0.1 && nowT <= adjEnd + 0.1) {
+                hitCurrent = true;
+              }
+            } catch {
+              // Ignore invalid cue timings
+            }
+          }
+          if (hitCurrent) {
+            onCuesChange(readActiveCueTexts(track));
+          }
+        };
+
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (ac.signal.aborted) {
+            reader.cancel().catch(() => {});
+            return;
+          }
+          if (done) {
+            buf += decoder.decode();
+            const { cues } = drainVTTCues(buf + "\n\n");
+            appendCues(cues);
+            break;
+          }
+          if (value && value.byteLength > 0) {
+            buf += decoder.decode(value, { stream: true });
+            const { cues, rest } = drainVTTCues(buf);
+            buf = rest;
+            appendCues(cues);
+          }
+        }
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        setStatusError(true);
+        setStatus(errMessage(err));
+      }
+    },
+    [fileIndex, hash, onCuesChange, video],
+  );
+
+  const startLiveEmbedded = useCallback(
+    (item: EmbeddedSubtitleTrack) => {
+      if (!video) return;
+      clearTrack();
+      setPreferred(`live:${item.streamIndex}`);
+      setLiveEmbedded(item);
+      setStatusError(false);
+      setStatus(`Live built-in: ${item.label} (streaming with video)`);
+
+      let track = liveTrackRef.current;
+      if (!track) {
+        const lang = item.language && item.language !== "und" ? item.language : language;
+        track = video.addTextTrack("subtitles", `Built-in · ${item.label}`, lang);
+        liveTrackRef.current = track;
+      }
+      track.mode = nativeFsRef.current ? "showing" : "hidden";
+      const syncCues = () => onCuesChange(readActiveCueTexts(track));
+      track.addEventListener("cuechange", syncCues);
+
+      const onSeeked = () => {
+        const t = video.currentTime;
+        const win = liveWindowRef.current;
+        if (t < win.start - 2 || t > win.maxEnd - 5) {
+          void pumpLiveStream(item, track, t);
+        }
+      };
+      video.addEventListener("seeked", onSeeked);
+      cueListenerCleanupRef.current = () => {
+        track.removeEventListener("cuechange", syncCues);
+        video.removeEventListener("seeked", onSeeked);
+      };
+
+      onActiveChange?.(true);
+      void pumpLiveStream(item, track, video.currentTime || 0);
+    },
+    [clearTrack, language, onActiveChange, onCuesChange, pumpLiveStream, video],
+  );
 
   const selectTrack = useCallback(
     async (id: string, trackList: SubtitleTrack[], delayVal: number) => {
       setPreferred(id);
+      setLiveEmbedded(null);
       clearTrack();
       if (!id || !video) {
         onActiveChange?.(false);
         return;
       }
+      if (id.startsWith("live:")) {
+        const idx = Number(id.slice(5));
+        const match = embedded.find((e) => e.streamIndex === idx);
+        if (match) {
+          startLiveEmbedded(match);
+        }
+        return;
+      }
 
       try {
-        const res = await client.getSubtitle({ hash, id });
+        const res = await client.getSubtitle({ hash, id, fileIndex });
         const meta = trackList.find((t) => t.id === id);
         const blob = new Blob([res.vtt], { type: "text/vtt" });
         const url = URL.createObjectURL(blob);
@@ -198,16 +429,30 @@ export function SubtitleDialog({
         setStatus(errMessage(err));
       }
     },
-    [applyDelay, clearTrack, hash, language, onActiveChange, onCuesChange, video],
+    [
+      applyDelay,
+      clearTrack,
+      embedded,
+      fileIndex,
+      hash,
+      language,
+      onActiveChange,
+      onCuesChange,
+      startLiveEmbedded,
+      video,
+    ],
   );
 
   const refresh = useCallback(
     async (selectedId?: string, autoSelect = true) => {
       try {
-        const data = await client.listSubtitles({ hash });
+        const data = await client.listSubtitles({ hash, fileIndex });
         setTracks(data.tracks);
         setEmbedded(data.embedded);
         setBundled(data.bundled);
+        if (data.activeProvider) {
+          setActiveProvider(data.activeProvider);
+        }
         if (!userPickedTabRef.current) {
           const hasLocal =
             data.tracks.length > 0 || data.embedded.length > 0 || data.bundled.length > 0;
@@ -215,7 +460,13 @@ export function SubtitleDialog({
         }
         if (autoSelect) {
           const target = selectedId !== undefined ? selectedId : preferred;
-          if (target && data.tracks.some((t) => t.id === target)) {
+          if (target && target.startsWith("live:")) {
+            const idx = Number(target.slice(5));
+            const match = data.embedded.find((e) => e.streamIndex === idx);
+            if (match) {
+              startLiveEmbedded(match);
+            }
+          } else if (target && data.tracks.some((t) => t.id === target)) {
             await selectTrack(target, data.tracks, offset);
           }
         }
@@ -224,32 +475,34 @@ export function SubtitleDialog({
         setStatus(errMessage(err));
       }
     },
-    [hash, offset, preferred, selectTrack],
+    [fileIndex, hash, offset, preferred, selectTrack, startLiveEmbedded],
   );
 
   useEffect(() => {
     if (!video) return;
+    liveTrackRef.current = null;
     userPickedTabRef.current = false;
     void refresh();
     return () => {
       clearTrack();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash, video]);
+  }, [hash, fileIndex, video]);
 
   useEffect(() => {
     if (!video) return;
     const handleMeta = () => {
-      if (trackElRef.current?.track) {
-        trackElRef.current.track.mode = nativeFsRef.current ? "showing" : "hidden";
-        applyDelay(trackElRef.current.track, offset);
+      const curTrack = activeTextTrack();
+      if (curTrack) {
+        curTrack.mode = nativeFsRef.current ? "showing" : "hidden";
+        applyDelay(curTrack, offset);
       } else if (preferred && tracks.some((t) => t.id === preferred)) {
         void selectTrack(preferred, tracks, offset);
       }
     };
     video.addEventListener("loadedmetadata", handleMeta);
     return () => video.removeEventListener("loadedmetadata", handleMeta);
-  }, [video, preferred, tracks, offset, applyDelay, selectTrack]);
+  }, [video, preferred, tracks, offset, applyDelay, selectTrack, activeTextTrack]);
 
   // Refresh subtitle list (including newly probed built-in tracks) whenever opened
   useEffect(() => {
@@ -268,14 +521,14 @@ export function SubtitleDialog({
   async function handleSearch() {
     setBusy(true);
     setStatusError(false);
-    setStatus("Searching YIFY Subtitles…");
+    setStatus(`Searching ${activeProvider}…`);
     setResults([]);
     try {
-      const res = await client.searchSubtitles({ hash, language });
+      const res = await client.searchSubtitles({ hash, language, fileIndex });
       setResults(res.results);
       setStatus(
         res.results.length
-          ? "Pick a release matching your video for best timing."
+          ? `Found ${res.results.length} subtitles${res.provider ? ` (${res.provider})` : ""}. Pick a release matching your video.`
           : "No new subtitles found for this language.",
       );
     } catch (err) {
@@ -289,6 +542,7 @@ export function SubtitleDialog({
   async function handleAdd(params: {
     action: string;
     id?: number;
+    downloadKey?: string;
     label?: string;
     index?: number;
     data?: Uint8Array;
@@ -309,15 +563,23 @@ export function SubtitleDialog({
         action: params.action,
         language: params.lang || language,
         id: params.id || 0,
+        downloadKey: params.downloadKey || "",
         label: params.label || "",
         index: params.index || 0,
         data: params.data || new Uint8Array(),
         filename: params.filename || "",
+        fileIndex,
       });
       if (res.track) {
         await refresh(res.track.id, true);
-        if (params.action === "download" && params.id) {
-          setResults((prev) => prev.filter((r) => r.id !== params.id));
+        if (params.action === "download") {
+          setResults((prev) =>
+            prev.filter(
+              (r) =>
+                (params.downloadKey ? r.downloadKey !== params.downloadKey : true) &&
+                (params.id ? r.id !== params.id : true),
+            ),
+          );
         }
         setStatus(`Active: ${res.track.label}`);
       }
@@ -436,6 +698,11 @@ export function SubtitleDialog({
               onChange={(e) => void selectTrack(e.target.value, tracks, offset)}
             >
               <option value="">Off</option>
+              {liveEmbedded && (
+                <option value={`live:${liveEmbedded.streamIndex}`}>
+                  Built-in (Live) · {liveEmbedded.label}
+                </option>
+              )}
               {tracks.map((sub) => (
                 <option key={sub.id} value={sub.id}>
                   {sub.language} · {sub.label}
@@ -456,7 +723,7 @@ export function SubtitleDialog({
               onChange={(e) => {
                 const next = Math.max(-120, Math.min(120, Number(e.target.value) || 0));
                 setOffset(next);
-                applyDelay(trackElRef.current?.track, next);
+                applyDelay(activeTextTrack(), next);
               }}
             />
           </label>
@@ -467,10 +734,12 @@ export function SubtitleDialog({
             <div className="sub-section-head">
               <h3>Built-in subtitles</h3>
               <Badge className="mono">{embedded.length}</Badge>
+              {!isComplete && <Badge tone="accent">Live streaming</Badge>}
             </div>
             <div className="sub-results">
               {embedded.map((item) => {
                 const isExtracting = extractingStream === item.streamIndex;
+                const isLiveActive = liveEmbedded?.streamIndex === item.streamIndex;
                 return (
                   <div key={item.streamIndex} className="sub-row">
                     <div className="sub-row-info">
@@ -480,25 +749,30 @@ export function SubtitleDialog({
                         {item.isDefault && <Badge tone="accent">Default</Badge>}
                         {item.hearingImpaired && <Badge>SDH</Badge>}
                         {item.forced && <Badge>Forced</Badge>}
+                        {isLiveActive && <Badge tone="ok">Live</Badge>}
                       </div>
                     </div>
                     <Button
-                      variant="secondary"
+                      variant={isLiveActive ? "primary" : "secondary"}
                       size="sm"
-                      disabled={busy}
-                      onClick={() =>
-                        void handleAdd({
-                          action: "embedded",
-                          index: item.streamIndex,
-                          label: item.label,
-                          lang:
-                            item.language && item.language !== "und"
-                              ? item.language
-                              : language,
-                        })
-                      }
+                      disabled={busy || isLiveActive}
+                      onClick={() => {
+                        if (isComplete) {
+                          void handleAdd({
+                            action: "embedded",
+                            index: item.streamIndex,
+                            label: item.label,
+                            lang:
+                              item.language && item.language !== "und"
+                                ? item.language
+                                : language,
+                          });
+                        } else {
+                          startLiveEmbedded(item);
+                        }
+                      }}
                     >
-                      {isExtracting ? "Extracting…" : "Use"}
+                      {isExtracting ? "Extracting…" : isLiveActive ? "Active" : "Use"}
                     </Button>
                   </div>
                 );
@@ -560,11 +834,12 @@ export function SubtitleDialog({
 
         <div className="sub-results">
           {results.map((match) => (
-            <div key={match.id} className="sub-row">
+            <div key={match.downloadKey || String(match.id)} className="sub-row">
               <div className="sub-row-info">
                 <span>{match.label}</span>
                 <small>
-                  Rating {match.rating}
+                  {match.provider ? `${match.provider.toUpperCase()} · ` : ""}
+                  {match.rating > 0 ? `Rating ${match.rating}` : "Subtitle"}
                   {match.hearingImpaired ? " · SDH" : ""}
                 </small>
               </div>
@@ -576,6 +851,7 @@ export function SubtitleDialog({
                   void handleAdd({
                     action: "download",
                     id: match.id,
+                    downloadKey: match.downloadKey,
                     label: match.label,
                   })
                 }

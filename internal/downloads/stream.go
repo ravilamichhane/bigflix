@@ -54,7 +54,13 @@ func ParseRange(raw string, size int64) (start, end int64, partial bool, err err
 func (m *Manager) Stream(w http.ResponseWriter, r *http.Request, hash string) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	reader, file, release, err := m.Reader(ctx, hash)
+	fileIndex := -1
+	if rawFile := strings.TrimSpace(r.URL.Query().Get("file")); rawFile != "" {
+		if idx, err := strconv.Atoi(rawFile); err == nil && idx >= 0 {
+			fileIndex = idx
+		}
+	}
+	reader, file, release, err := m.ReaderForFile(ctx, hash, fileIndex)
 	if err != nil {
 		status := http.StatusConflict
 		if err == ErrNotFound {
@@ -80,6 +86,10 @@ func (m *Manager) Stream(w http.ResponseWriter, r *http.Request, hash string) {
 		contentType = "video/x-matroska"
 	case ".mov":
 		contentType = "video/quicktime"
+	case ".ts", ".m2ts":
+		contentType = "video/mp2t"
+	case ".avi":
+		contentType = "video/x-msvideo"
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Accept-Ranges", "bytes")

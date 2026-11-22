@@ -24,9 +24,12 @@ WORKDIR /app
 COPY --from=backend /out/bigflix /usr/local/bin/bigflix
 RUN mkdir -p /data /media/torrents
 
-# Optional runtime secrets (not baked into image):
-#   -e AUTH_TOKEN=<secret>       (defaults to "bigflix")
-#   -e TMDB_READ_TOKEN=<token>   (optional TMDB API Read Access Token)
+# Optional runtime secrets & tuning (not baked into image; most are also editable in Settings UI):
+#   -e AUTH_TOKEN=<secret>           (defaults to "bigflix")
+#   -e TMDB_READ_TOKEN=<token>       (TMDB API Read Access Token for Movies & TV catalog)
+#   -e AI_API_URL=http://llama-server:8080/v1  (optional local CPU AI classifier)
+#   -e SUBDL_API_KEY=<key>           (optional online TV/movie subtitle search)
+#   -e OPENSUBTITLES_API_KEY=<key>   (optional online TV/movie subtitle search)
 # Override storage paths with -e DATA_DIR=... -e MEDIA_DIR=... or mount directly to /data and /media.
 ENV PORT=3000 \
     BIND_ADDR=0.0.0.0 \
@@ -35,7 +38,8 @@ ENV PORT=3000 \
     MEDIA_DIR=/media/torrents \
     YTS_API_URL=https://movies-api.accel.li/api/v2/ \
     MEDIA_BUDGET_GB=50 \
-    MIN_FREE_GB=10
+    MIN_FREE_GB=10 \
+    FFMPEG_THREADS=2
 
 EXPOSE 3000/tcp 51413/tcp 51413/udp
 VOLUME ["/data", "/media"]

@@ -43,7 +43,17 @@ func (a *App) ListDownloads(ctx context.Context, _ *connect.Request[bigflixv1.Li
 	for _, item := range list {
 		out = append(out, statusToProto(item))
 	}
-	return connect.NewResponse(&bigflixv1.ListDownloadsResponse{Downloads: out}), nil
+	used, budget := a.engine.StorageUsage()
+	autoEvict := true
+	if a.store != nil {
+		autoEvict = a.store.LoadPlaybackPrefs(ctx).AutoEvict
+	}
+	return connect.NewResponse(&bigflixv1.ListDownloadsResponse{
+		Downloads:          out,
+		StorageUsedBytes:   used,
+		StorageBudgetBytes: budget,
+		AutoEvict:          autoEvict,
+	}), nil
 }
 
 func (a *App) GetDownload(ctx context.Context, req *connect.Request[bigflixv1.GetDownloadRequest]) (*connect.Response[bigflixv1.GetDownloadResponse], error) {
@@ -128,7 +138,7 @@ func (a *App) UpdateDownload(ctx context.Context, req *connect.Request[bigflixv1
 		clearProbeCache(hash)
 		return connect.NewResponse(&bigflixv1.UpdateDownloadResponse{}), nil
 	}
-	if err := a.engine.Update(hash, req.Msg.Action, int(req.Msg.FileIndex), req.Msg.Position); err != nil {
+	if err := a.engine.UpdateWithDuration(hash, req.Msg.Action, int(req.Msg.FileIndex), req.Msg.Position, req.Msg.Duration); err != nil {
 		return nil, downloadErr(err)
 	}
 	s, err := a.engine.Get(hash)

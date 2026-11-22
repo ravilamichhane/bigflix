@@ -1,21 +1,31 @@
 import { useEffect, useState } from "react";
 import { client, errMessage, formatTime } from "../api";
-import type { GetMovieResponse } from "../gen/bigflix/v1/bigflix_pb";
+import type { GetMovieDetailResponse, GetMovieResponse } from "../gen/bigflix/v1/bigflix_pb";
 import type { NavigateFn } from "../types";
-import { ArrowLeftIcon, CheckIcon, CopyIcon, DownloadIcon, PlayIcon } from "./Icons";
-import { Badge, Button, EmptyState } from "./ui";
+import { ArrowLeftIcon, DownloadIcon, PlayIcon, SlidersIcon } from "./Icons";
+import { SourcesDrawer } from "./SourcesDrawer";
+import { Badge, Button, EmptyState, ProgressBar } from "./ui";
 
 interface DetailPageProps {
   id: number;
+  ytsFallback?: boolean;
   navigate: NavigateFn;
 }
 
-export function DetailPage({ id, navigate }: DetailPageProps) {
-  const [data, setData] = useState<GetMovieResponse | null>(null);
+function formatResume(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}m`;
+  return `${m}m`;
+}
+
+export function DetailPage({ id, ytsFallback = false, navigate }: DetailPageProps) {
+  const [tmdbData, setTmdbData] = useState<GetMovieDetailResponse | null>(null);
+  const [ytsData, setYtsData] = useState<GetMovieResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [startingHash, setStartingHash] = useState("");
-  const [copiedHash, setCopiedHash] = useState("");
+  const [starting, setStarting] = useState<"play" | "keep" | "">("");
+  const [showSources, setShowSources] = useState(false);
   const [posterBroken, setPosterBroken] = useState(false);
 
   useEffect(() => {
@@ -23,115 +33,152 @@ export function DetailPage({ id, navigate }: DetailPageProps) {
     setLoading(true);
     setError("");
     setPosterBroken(false);
-    client
-      .getMovie({ id })
-      .then((res) => {
-        if (active) setData(res);
-      })
-      .catch((err) => {
-        if (active) setError(errMessage(err));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    setShowSources(false);
+
+    if (ytsFallback) {
+      client
+        .getMovie({ id })
+        .then((res) => {
+          if (active) setYtsData(res);
+        })
+        .catch((err) => {
+          if (active) setError(errMessage(err));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    } else {
+      client
+        .getMovieDetail({ tmdbId: id })
+        .then((res) => {
+          if (active) setTmdbData(res);
+        })
+        .catch((err) => {
+          if (active) setError(errMessage(err));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
     return () => {
       active = false;
     };
-  }, [id]);
+  }, [id, ytsFallback]);
 
-  async function start(hash: string, keep: boolean) {
-    if (!data?.movie) return;
-    setStartingHash(hash);
+  async function startAutoPlay(keep: boolean, overrideHash = "") {
+    setStarting(keep ? "keep" : "play");
     setError("");
     try {
-      const res = await client.startDownload({
-        movieId: data.movie.id,
-        hash,
+      if (ytsFallback && ytsData?.movie) {
+        const best = ytsData.movie.torrents.find((t) => t.quality === "1080p") || ytsData.movie.torrents[0];
+        if (!best) throw new Error("No torrent source listed for this movie.");
+        const res = await client.startDownload({
+          movieId: ytsData.movie.id,
+          hash: overrideHash || best.hash,
+          keep,
+        });
+        if (res.download?.hash) {
+          navigate(`/watch/${res.download.hash}`);
+        }
+        return;
+      }
+      const res = await client.startPlayback({
+        mediaType: "movie",
+        tmdbId: id,
         keep,
+        overrideHash,
       });
       if (res.download?.hash) {
         navigate(`/watch/${res.download.hash}`);
       }
     } catch (err) {
       setError(errMessage(err));
-      setStartingHash("");
+      setStarting("");
     }
   }
 
-  async function copyHash(hash: string) {
-    try {
-      await navigator.clipboard.writeText(hash);
-      setCopiedHash(hash);
-      window.setTimeout(() => setCopiedHash(""), 2000);
-    } catch {
-      // Ignore clipboard failure
-    }
-  }
-
-  const movie = data?.movie;
+  const movie = tmdbData?.movie;
+  const legacy = ytsData?.movie;
+  const title = movie?.title || legacy?.title || "";
+  const poster = movie?.poster || legacy?.poster || "";
+  const backdrop = movie?.backdrop || poster;
+  const rating = movie?.rating || legacy?.rating || 0;
+  const year = movie?.year || legacy?.year || 0;
+  const runtime = movie?.runtime || legacy?.runtime || 0;
+  const language = movie?.language || legacy?.language || "";
+  const imdb = movie?.imdbCode || legacy?.imdbCode || "";
+  const genres = movie?.genres || legacy?.genres || [];
+  const overview = movie?.overview || legacy?.summary || "";
+  const progress = tmdbData?.progress;
+  const hasResume = !!progress && !progress.completed && progress.position > 15;
+  const progressPct =
+    progress && progress.duration > 0
+      ? Math.min(1, Math.max(0, progress.position / progress.duration))
+      : 0;
 
   return (
     <div>
       <a
-        href="/"
+        href="/movies"
         className="ds-back"
         onClick={(e) => {
           e.preventDefault();
-          navigate("/");
+          navigate("/movies");
         }}
       >
-        <ArrowLeftIcon size={16} /> Back
+        <ArrowLeftIcon size={16} /> Movies
       </a>
 
       {loading ? (
         <EmptyState title="Loading movie…" />
-      ) : error && !movie ? (
+      ) : error && !title ? (
         <EmptyState
           title="Movie unavailable"
           description={error}
-          actions={<Button onClick={() => navigate("/")}>Browse movies</Button>}
+          actions={<Button onClick={() => navigate("/movies")}>Browse movies</Button>}
         />
       ) : (
-        movie && (
+        title && (
           <>
             <section className="detail-hero">
-              {movie.poster && !posterBroken && (
+              {backdrop && !posterBroken && (
                 <div
                   className="detail-backdrop"
-                  style={{ backgroundImage: `url(${movie.poster})` }}
+                  style={{ backgroundImage: `url(${backdrop})` }}
                   aria-hidden="true"
                 />
               )}
               <div className="detail-hero-grid">
                 <div className="detail-poster poster-frame">
-                  {movie.poster && !posterBroken && (
+                  {poster && !posterBroken && (
                     <img
-                      src={movie.poster}
-                      alt={`${movie.title} poster`}
+                      src={poster}
+                      alt={`${title} poster`}
                       onError={() => setPosterBroken(true)}
                     />
                   )}
                   <div className="poster-fallback">
-                    <strong>{movie.title}</strong>
+                    <strong>{title}</strong>
                   </div>
                 </div>
 
                 <div className="detail-copy">
-                  <h1>{movie.title}</h1>
+                  <h1>{title}</h1>
 
                   <div className="detail-facts">
-                    {movie.rating > 0 && (
+                    {rating > 0 && (
                       <Badge tone="accent" className="mono">
-                        ★ {movie.rating.toFixed(1)}
+                        ★ {rating.toFixed(1)}
                       </Badge>
                     )}
-                    {!!movie.year && <Badge className="mono">{movie.year}</Badge>}
-                    {!!movie.runtime && <Badge className="mono">{movie.runtime}m</Badge>}
-                    {movie.language && <Badge>{movie.language}</Badge>}
-                    {movie.imdbCode && (
+                    {!!year && <Badge className="mono">{year}</Badge>}
+                    {!!runtime && <Badge className="mono">{runtime}m</Badge>}
+                    {language && <Badge>{language.toUpperCase()}</Badge>}
+                    {tmdbData?.activeDownloadHash && <Badge tone="ok">In library</Badge>}
+                    {imdb && (
                       <a
                         className="ds-link"
-                        href={`https://www.imdb.com/title/${movie.imdbCode}/`}
+                        href={`https://www.imdb.com/title/${imdb}/`}
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -140,15 +187,55 @@ export function DetailPage({ id, navigate }: DetailPageProps) {
                     )}
                   </div>
 
-                  {movie.genres.length > 0 && (
+                  {genres.length > 0 && (
                     <div className="detail-genres">
-                      {movie.genres.map((g) => (
+                      {genres.map((g) => (
                         <Badge key={g}>{g}</Badge>
                       ))}
                     </div>
                   )}
 
-                  {movie.summary && <p className="detail-synopsis">{movie.summary}</p>}
+                  {overview && <p className="detail-synopsis">{overview}</p>}
+
+                  {hasResume && progressPct > 0 && (
+                    <div className="detail-progress">
+                      <ProgressBar value={progressPct} label="Resume progress" />
+                      <span className="muted mono">
+                        Paused at {formatResume(progress.position)}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="detail-cta-row">
+                    <Button
+                      disabled={starting !== ""}
+                      onClick={() => void startAutoPlay(false)}
+                    >
+                      <PlayIcon size={16} />
+                      {starting === "play"
+                        ? "Finding best source…"
+                        : hasResume
+                          ? "Resume"
+                          : "Play"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={starting !== ""}
+                      onClick={() => void startAutoPlay(true)}
+                    >
+                      <DownloadIcon size={16} />
+                      {starting === "keep" ? "Starting…" : "Keep offline"}
+                    </Button>
+                    {!ytsFallback && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => setShowSources((v) => !v)}
+                      >
+                        <SlidersIcon size={15} />
+                        {showSources ? "Hide sources" : "Sources"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </section>
@@ -159,79 +246,23 @@ export function DetailPage({ id, navigate }: DetailPageProps) {
               </div>
             )}
 
-            <section className="sources-section">
-              <div className="section-bar">
-                <h2>Available sources</h2>
-                <Badge className="mono">{movie.torrents.length}</Badge>
-              </div>
+            {showSources && !ytsFallback && (
+              <section className="sources-section">
+                <SourcesDrawer
+                  inline
+                  mediaType="movie"
+                  tmdbId={id}
+                  activeHash={tmdbData?.activeDownloadHash || ""}
+                  title={`Sources for ${title}`}
+                  onSelect={(hash, keep) => startAutoPlay(keep, hash)}
+                  onClose={() => setShowSources(false)}
+                />
+              </section>
+            )}
 
-              <div className="source-grid">
-                {movie.torrents.length ? (
-                  movie.torrents.map((t) => {
-                    const health =
-                      t.seeds >= 30 ? "health-good" : t.seeds >= 8 ? "health-mid" : "health-low";
-                    return (
-                      <article key={t.hash} className="source-card">
-                        <div className="source-head">
-                          <div className="source-title">
-                            <strong>{t.quality}</strong>
-                            <Badge>{t.type}</Badge>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title="Copy info hash"
-                            aria-label="Copy info hash"
-                            onClick={() => void copyHash(t.hash)}
-                          >
-                            {copiedHash === t.hash ? (
-                              <CheckIcon size={14} />
-                            ) : (
-                              <CopyIcon size={14} />
-                            )}
-                          </Button>
-                        </div>
-
-                        <div className="source-specs">
-                          <span>{t.size}</span>
-                          {t.videoCodec && <span>{t.videoCodec}</span>}
-                          <span>
-                            <span className={`health-dot ${health}`} />
-                            {t.seeds} seeds · {t.peers} peers
-                          </span>
-                        </div>
-
-                        <div className="source-actions">
-                          <Button
-                            disabled={startingHash === t.hash}
-                            onClick={() => void start(t.hash, false)}
-                          >
-                            <PlayIcon size={14} />
-                            {startingHash === t.hash ? "Starting…" : "Watch"}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            disabled={startingHash === t.hash}
-                            onClick={() => void start(t.hash, true)}
-                          >
-                            <DownloadIcon size={14} /> Keep
-                          </Button>
-                        </div>
-                      </article>
-                    );
-                  })
-                ) : (
-                  <EmptyState
-                    title="No sources listed"
-                    description="No valid torrent variants were returned for this title."
-                  />
-                )}
-              </div>
-            </section>
-
-            {data?.stale && (
+            {(tmdbData?.stale || ytsData?.stale) && (
               <div className="ds-alert ds-alert-warn">
-                Cached metadata · updated {formatTime(data.updatedAt)}
+                Cached metadata · updated {formatTime(tmdbData?.updatedAt || ytsData?.updatedAt || "")}
               </div>
             )}
           </>

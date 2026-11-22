@@ -11,8 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DownloadsRouteImport } from './routes/downloads'
+import { Route as MoviesRouteImport } from './routes/movies'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MovieIdRouteImport } from './routes/movie.$id'
+import { Route as SeriesIndexRouteImport } from './routes/series.index'
+import { Route as SeriesTmdbIdRouteImport } from './routes/series.$tmdbId'
 import { Route as SourcesTmdbIdRouteImport } from './routes/sources.$tmdbId'
 import { Route as WatchHashRouteImport } from './routes/watch.$hash'
 
@@ -26,6 +29,11 @@ const DownloadsRoute = DownloadsRouteImport.update({
   path: '/downloads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MoviesRoute = MoviesRouteImport.update({
+  id: '/movies',
+  path: '/movies',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -34,6 +42,16 @@ const SettingsRoute = SettingsRouteImport.update({
 const MovieIdRoute = MovieIdRouteImport.update({
   id: '/movie/$id',
   path: '/movie/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SeriesIndexRoute = SeriesIndexRouteImport.update({
+  id: '/series/',
+  path: '/series/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SeriesTmdbIdRoute = SeriesTmdbIdRouteImport.update({
+  id: '/series/$tmdbId',
+  path: '/series/$tmdbId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SourcesTmdbIdRoute = SourcesTmdbIdRouteImport.update({
@@ -50,62 +68,83 @@ const WatchHashRoute = WatchHashRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/downloads': typeof DownloadsRoute
+  '/movies': typeof MoviesRoute
   '/settings': typeof SettingsRoute
   '/movie/$id': typeof MovieIdRoute
+  '/series/$tmdbId': typeof SeriesTmdbIdRoute
   '/sources/$tmdbId': typeof SourcesTmdbIdRoute
   '/watch/$hash': typeof WatchHashRoute
+  '/series/': typeof SeriesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/downloads': typeof DownloadsRoute
+  '/movies': typeof MoviesRoute
   '/settings': typeof SettingsRoute
   '/movie/$id': typeof MovieIdRoute
+  '/series/$tmdbId': typeof SeriesTmdbIdRoute
   '/sources/$tmdbId': typeof SourcesTmdbIdRoute
   '/watch/$hash': typeof WatchHashRoute
+  '/series': typeof SeriesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/downloads': typeof DownloadsRoute
+  '/movies': typeof MoviesRoute
   '/settings': typeof SettingsRoute
   '/movie/$id': typeof MovieIdRoute
+  '/series/$tmdbId': typeof SeriesTmdbIdRoute
   '/sources/$tmdbId': typeof SourcesTmdbIdRoute
   '/watch/$hash': typeof WatchHashRoute
+  '/series/': typeof SeriesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/downloads'
+    | '/movies'
     | '/settings'
     | '/movie/$id'
+    | '/series/$tmdbId'
     | '/sources/$tmdbId'
     | '/watch/$hash'
+    | '/series/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/downloads'
+    | '/movies'
     | '/settings'
     | '/movie/$id'
+    | '/series/$tmdbId'
     | '/sources/$tmdbId'
     | '/watch/$hash'
+    | '/series'
   id:
     | '__root__'
     | '/'
     | '/downloads'
+    | '/movies'
     | '/settings'
     | '/movie/$id'
+    | '/series/$tmdbId'
     | '/sources/$tmdbId'
     | '/watch/$hash'
+    | '/series/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DownloadsRoute: typeof DownloadsRoute
+  MoviesRoute: typeof MoviesRoute
   SettingsRoute: typeof SettingsRoute
   MovieIdRoute: typeof MovieIdRoute
+  SeriesTmdbIdRoute: typeof SeriesTmdbIdRoute
   SourcesTmdbIdRoute: typeof SourcesTmdbIdRoute
   WatchHashRoute: typeof WatchHashRoute
+  SeriesIndexRoute: typeof SeriesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -124,6 +163,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DownloadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/movies': {
+      id: '/movies'
+      path: '/movies'
+      fullPath: '/movies'
+      preLoaderRoute: typeof MoviesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -136,6 +182,20 @@ declare module '@tanstack/react-router' {
       path: '/movie/$id'
       fullPath: '/movie/$id'
       preLoaderRoute: typeof MovieIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/series/': {
+      id: '/series/'
+      path: '/series'
+      fullPath: '/series/'
+      preLoaderRoute: typeof SeriesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/series/$tmdbId': {
+      id: '/series/$tmdbId'
+      path: '/series/$tmdbId'
+      fullPath: '/series/$tmdbId'
+      preLoaderRoute: typeof SeriesTmdbIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sources/$tmdbId': {
@@ -158,10 +218,13 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DownloadsRoute: DownloadsRoute,
+  MoviesRoute: MoviesRoute,
   SettingsRoute: SettingsRoute,
   MovieIdRoute: MovieIdRoute,
+  SeriesTmdbIdRoute: SeriesTmdbIdRoute,
   SourcesTmdbIdRoute: SourcesTmdbIdRoute,
   WatchHashRoute: WatchHashRoute,
+  SeriesIndexRoute: SeriesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

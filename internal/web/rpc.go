@@ -64,29 +64,51 @@ func statusToProto(s downloads.Status) *bigflixv1.DownloadStatus {
 			Playable: f.Playable,
 		})
 	}
+	epFiles := make([]*bigflixv1.EpisodeFileMap, 0, len(s.EpisodeFiles))
+	for _, ef := range s.EpisodeFiles {
+		epFiles = append(epFiles, &bigflixv1.EpisodeFileMap{
+			FileIndex:     int32(ef.FileIndex),
+			SeasonNumber:  int32(ef.Season),
+			EpisodeNumber: int32(ef.Episode),
+			Name:          ef.Name,
+			Size:          ef.Size,
+		})
+	}
 	return &bigflixv1.DownloadStatus{
-		Hash:        s.Hash,
-		Title:       s.Title,
-		Poster:      s.Poster,
-		MovieId:     int32(s.MovieID),
-		FileIndex:   int32(s.FileIndex),
-		Keep:        s.Keep,
-		Paused:      s.Paused,
-		Created:     formatTime(s.Created),
-		Position:    s.Position,
-		State:       s.State,
-		Error:       s.Error,
-		Files:       files,
-		Size:        s.Size,
-		Completed:   s.Completed,
-		Buffered:    s.Buffered,
-		Speed:       s.Speed,
-		Peers:       int32(s.Peers),
-		Discovering: s.Discovering,
-		Readers:     int32(s.Readers),
-		Progress:    s.Progress,
-		Playable:    s.Playable,
-		Direct:      s.Direct,
+		Hash:              s.Hash,
+		Title:             s.Title,
+		Poster:            s.Poster,
+		MovieId:           int32(s.MovieID),
+		FileIndex:         int32(s.FileIndex),
+		Keep:              s.Keep,
+		Paused:            s.Paused,
+		Created:           formatTime(s.Created),
+		Position:          s.Position,
+		State:             s.State,
+		Error:             s.Error,
+		Files:             files,
+		Size:              s.Size,
+		Completed:         s.Completed,
+		Buffered:          s.Buffered,
+		Speed:             s.Speed,
+		Peers:             int32(s.Peers),
+		Discovering:       s.Discovering,
+		Readers:           int32(s.Readers),
+		Progress:          s.Progress,
+		Playable:          s.Playable,
+		Direct:            s.Direct,
+		MediaType:         s.MediaType,
+		TmdbId:            int32(s.TMDBID),
+		ImdbId:            s.IMDbID,
+		SeasonNumber:      int32(s.Season),
+		EpisodeNumber:     int32(s.Episode),
+		EpisodeTitle:      s.EpisodeTitle,
+		ActiveSourceLabel: s.ActiveSourceLabel,
+		ReplacedByHash:    s.ReplacedByHash,
+		FailoverAttempt:   int32(s.FailoverAttempt),
+		FailoverTotal:     int32(s.FailoverTotal),
+		FailoverNote:      s.FailoverNote,
+		EpisodeFiles:      epFiles,
 	}
 }
 
@@ -229,7 +251,11 @@ func (a *App) FindSources(ctx context.Context, req *connect.Request[bigflixv1.Fi
 }
 
 func (a *App) ProbeMedia(ctx context.Context, req *connect.Request[bigflixv1.ProbeMediaRequest]) (*connect.Response[bigflixv1.ProbeMediaResponse], error) {
-	p, err := a.probeMedia(ctx, strings.ToLower(strings.TrimSpace(req.Msg.Hash)))
+	fileIdx := -1
+	if req.Msg.FileIndex != nil && *req.Msg.FileIndex >= 0 {
+		fileIdx = int(*req.Msg.FileIndex)
+	}
+	p, err := a.probeMediaForFile(ctx, strings.ToLower(strings.TrimSpace(req.Msg.Hash)), fileIdx)
 	if err != nil {
 		switch {
 		case errors.Is(err, downloads.ErrNotFound):
@@ -240,43 +266,26 @@ func (a *App) ProbeMedia(ctx context.Context, req *connect.Request[bigflixv1.Pro
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	}
-	return connect.NewResponse(&bigflixv1.ProbeMediaResponse{
-		Duration: p.Duration,
-		Video:    p.Video,
-		Codecs:   p.Codecs,
-		Width:    int32(p.Width),
-		Height:   int32(p.Height),
-		Audio:    p.Audio,
-	}), nil
-}
-
-func (a *App) GetSettings(_ context.Context, _ *connect.Request[bigflixv1.GetSettingsRequest]) (*connect.Response[bigflixv1.GetSettingsResponse], error) {
-	resp := &bigflixv1.GetSettingsResponse{
-		HasTmdb:   a.service != nil && a.service.HasTMDB(),
-		HasEngine: a.engine != nil,
-	}
-	if a.engine == nil {
-		return connect.NewResponse(resp), nil
-	}
-	network, err := a.engine.NetworkSettings()
-	resp.AllInterfaces = network.All
-	resp.Port = int32(network.Port)
-	resp.ActualPort = int32(network.ActualPort)
-	resp.Errors = append(resp.Errors, network.Errors...)
-	if err != nil {
-		resp.Errors = append(resp.Errors, "Unable to read network interfaces")
-	}
-	for _, item := range network.Interfaces {
-		resp.Interfaces = append(resp.Interfaces, &bigflixv1.NetworkInterface{
-			Name:      item.Name,
-			Up:        item.Up,
-			Addresses: item.Addresses,
-			Selected:  item.Selected,
-			Port:      int32(item.Port),
-			Listeners: item.Listeners,
+	audioTracks := make([]*bigflixv1.EmbeddedAudioTrack, 0, len(p.AudioTracks))
+	for _, tr := range p.AudioTracks {
+		audioTracks = append(audioTracks, &bigflixv1.EmbeddedAudioTrack{
+			StreamIndex: int32(tr.StreamIndex),
+			Language:    tr.Language,
+			Label:       tr.Label,
+			Codec:       tr.Codec,
+			Channels:    int32(tr.Channels),
+			IsDefault:   tr.Default,
 		})
 	}
-	return connect.NewResponse(resp), nil
+	return connect.NewResponse(&bigflixv1.ProbeMediaResponse{
+		Duration:    p.Duration,
+		Video:       p.Video,
+		Codecs:      p.Codecs,
+		Width:       int32(p.Width),
+		Height:      int32(p.Height),
+		Audio:       p.Audio,
+		AudioTracks: audioTracks,
+	}), nil
 }
 
 func (a *App) SaveNetworkSettings(ctx context.Context, req *connect.Request[bigflixv1.SaveNetworkSettingsRequest]) (*connect.Response[bigflixv1.SaveNetworkSettingsResponse], error) {

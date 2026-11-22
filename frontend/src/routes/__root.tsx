@@ -9,28 +9,25 @@ import {
   BrandMarkIcon,
   CompassIcon,
   DownloadIcon,
-  FlameIcon,
+  FilmIcon,
   LockIcon,
   SettingsIcon,
-  SparklesIcon,
+  TvIcon,
 } from "../components/Icons";
 import { NotFoundView } from "../components/NotFoundView";
 import type { RouterContext } from "../router";
 
 function RootLayout() {
   const { lock } = useRouteContext({ from: "__root__" });
-  const { pathname, search } = useRouterState({
+  const { pathname } = useRouterState({
     select: (s) => ({
       pathname: s.location.pathname,
-      search: s.location.searchStr,
     }),
   });
-  const params = new URLSearchParams(search);
-  const feed = pathname === "/" ? params.get("feed") || "library" : "";
 
-  const isDiscover = pathname === "/" && feed === "library";
-  const isTrending = pathname === "/" && (feed === "day" || feed === "week");
-  const isNew = pathname === "/" && feed === "new";
+  const isDiscover = pathname === "/";
+  const isMovies = pathname === "/movies" || pathname.startsWith("/movie/") || pathname.startsWith("/sources/");
+  const isSeries = pathname === "/series" || pathname.startsWith("/series/");
   const isDownloads = pathname === "/downloads" || pathname.startsWith("/watch/");
   const isSettings = pathname === "/settings";
 
@@ -49,19 +46,11 @@ function RootLayout() {
             <Link to="/" aria-current={isDiscover ? "page" : undefined}>
               Discover
             </Link>
-            <Link
-              to="/"
-              search={{ feed: "day" }}
-              aria-current={isTrending ? "page" : undefined}
-            >
-              Trending
+            <Link to="/movies" aria-current={isMovies ? "page" : undefined}>
+              Movies
             </Link>
-            <Link
-              to="/"
-              search={{ feed: "new" }}
-              aria-current={isNew ? "page" : undefined}
-            >
-              New
+            <Link to="/series" aria-current={isSeries ? "page" : undefined}>
+              TV Series
             </Link>
             <Link to="/downloads" aria-current={isDownloads ? "page" : undefined}>
               Downloads
@@ -100,21 +89,13 @@ function RootLayout() {
           <CompassIcon size={20} />
           <span>Discover</span>
         </Link>
-        <Link
-          to="/"
-          search={{ feed: "day" }}
-          aria-current={isTrending ? "page" : undefined}
-        >
-          <FlameIcon size={20} />
-          <span>Trending</span>
+        <Link to="/movies" aria-current={isMovies ? "page" : undefined}>
+          <FilmIcon size={20} />
+          <span>Movies</span>
         </Link>
-        <Link
-          to="/"
-          search={{ feed: "new" }}
-          aria-current={isNew ? "page" : undefined}
-        >
-          <SparklesIcon size={20} />
-          <span>New</span>
+        <Link to="/series" aria-current={isSeries ? "page" : undefined}>
+          <TvIcon size={20} />
+          <span>Series</span>
         </Link>
         <Link to="/downloads" aria-current={isDownloads ? "page" : undefined}>
           <DownloadIcon size={20} />

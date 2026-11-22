@@ -113,10 +113,31 @@ func New(store *database.Store, base, token string) (*Service, error) {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("YTS_API_URL must be an HTTPS base URL")
 	}
-	return &Service{store: store, base: strings.TrimRight(base, "/") + "/", tmdb: "https://api.themoviedb.org/3/", token: token, client: PublicClient(), slots: make(chan struct{}, 2)}, nil
+	if store != nil {
+		token = store.LoadTMDBToken(context.Background(), token)
+	}
+	return &Service{store: store, base: strings.TrimRight(base, "/") + "/", tmdb: "https://api.themoviedb.org/3/", token: strings.TrimSpace(token), client: PublicClient(), slots: make(chan struct{}, 2)}, nil
 }
-func (s *Service) HasTMDB() bool { return s.token != "" }
+func (s *Service) getToken() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.token
+}
+func (s *Service) SetTMDBToken(ctx context.Context, token string) error {
+	clean := strings.TrimSpace(token)
+	if s.store != nil {
+		if err := s.store.PutConfig(ctx, "tmdb", database.TMDBConfig{ReadToken: clean}); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	s.token = clean
+	s.mu.Unlock()
+	return nil
+}
+func (s *Service) HasTMDB() bool          { return s.getToken() != "" }
 func (s *Service) Store() *database.Store { return s.store }
+func (s *Service) YTSBase() string        { return s.base }
 func (s *Service) fetch(ctx context.Context, address string, ttl time.Duration, auth bool, validate func([]byte) error) ([]byte, time.Time, bool, error) {
 	cached, at, cacheErr := s.store.Get(ctx, address)
 	if cacheErr == nil && time.Since(at) < ttl && validate(cached) == nil {
@@ -147,7 +168,7 @@ func (s *Service) fetch(ctx context.Context, address string, ttl time.Duration, 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Bigflix/0.1")
 	if auth {
-		req.Header.Set("Authorization", "Bearer "+s.token)
+		req.Header.Set("Authorization", "Bearer "+s.getToken())
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {

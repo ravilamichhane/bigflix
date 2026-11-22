@@ -13,23 +13,32 @@ import (
 	"connectrpc.com/connect"
 )
 
-func (a *App) subtitleService(hash string) (*subtitles.Service, error) {
+func (a *App) subtitleService(hash string) (*subtitles.Service, downloads.Status, error) {
 	if a.engine == nil {
-		return nil, connect.NewError(connect.CodeUnavailable, errors.New("download engine unavailable"))
+		return nil, downloads.Status{}, connect.NewError(connect.CodeUnavailable, errors.New("download engine unavailable"))
 	}
-	if _, err := a.engine.Get(hash); err != nil {
-		return nil, downloadErr(err)
+	st, err := a.engine.Get(hash)
+	if err != nil {
+		return nil, downloads.Status{}, downloadErr(err)
 	}
-	return a.engine.SubtitleService(), nil
+	return a.engine.SubtitleService(), st, nil
+}
+
+func effectiveFileIndex(opt *int32, st downloads.Status) int {
+	if opt != nil && *opt >= 0 {
+		return int(*opt)
+	}
+	return st.FileIndex
 }
 
 func (a *App) ListSubtitles(ctx context.Context, req *connect.Request[bigflixv1.ListSubtitlesRequest]) (*connect.Response[bigflixv1.ListSubtitlesResponse], error) {
 	hash := strings.ToLower(strings.TrimSpace(req.Msg.Hash))
-	s, err := a.subtitleService(hash)
+	s, st, err := a.subtitleService(hash)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.DB.Subtitles(ctx, hash)
+	fileIdx := effectiveFileIndex(req.Msg.FileIndex, st)
+	list, err := s.DB.SubtitlesForFile(ctx, hash, fileIdx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("cannot read subtitles"))
 	}
@@ -41,7 +50,7 @@ func (a *App) ListSubtitles(ctx context.Context, req *connect.Request[bigflixv1.
 			Language: t.Language,
 		})
 	}
-	bundledFiles := a.engine.SubtitleFiles(hash)
+	bundledFiles := a.engine.SubtitleFilesForFile(hash, fileIdx)
 	bundled := make([]*bigflixv1.BundledSubtitleFile, 0, len(bundledFiles))
 	for _, f := range bundledFiles {
 		bundled = append(bundled, &bigflixv1.BundledSubtitleFile{
@@ -49,7 +58,7 @@ func (a *App) ListSubtitles(ctx context.Context, req *connect.Request[bigflixv1.
 			Name:  f.Name,
 		})
 	}
-	embeddedTracks := a.cachedEmbeddedSubtitles(ctx, hash)
+	embeddedTracks := a.cachedEmbeddedSubtitlesForFile(ctx, hash, fileIdx)
 	embedded := make([]*bigflixv1.EmbeddedSubtitleTrack, 0, len(embeddedTracks))
 	for _, e := range embeddedTracks {
 		embedded = append(embedded, &bigflixv1.EmbeddedSubtitleTrack{
@@ -63,20 +72,22 @@ func (a *App) ListSubtitles(ctx context.Context, req *connect.Request[bigflixv1.
 		})
 	}
 	return connect.NewResponse(&bigflixv1.ListSubtitlesResponse{
-		Tracks:     tracks,
-		Bundled:    bundled,
-		Configured: true,
-		Embedded:   embedded,
+		Tracks:         tracks,
+		Bundled:        bundled,
+		Configured:     true,
+		Embedded:       embedded,
+		ActiveProvider: s.ActiveProviderName(ctx, st.MediaType),
 	}), nil
 }
 
 func (a *App) GetSubtitle(ctx context.Context, req *connect.Request[bigflixv1.GetSubtitleRequest]) (*connect.Response[bigflixv1.GetSubtitleResponse], error) {
 	hash := strings.ToLower(strings.TrimSpace(req.Msg.Hash))
-	s, err := a.subtitleService(hash)
+	s, st, err := a.subtitleService(hash)
 	if err != nil {
 		return nil, err
 	}
-	b, err := s.DB.Subtitle(ctx, hash, req.Msg.Id)
+	fileIdx := effectiveFileIndex(req.Msg.FileIndex, st)
+	b, err := s.DB.SubtitleForFile(ctx, hash, fileIdx, req.Msg.Id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("subtitle not found"))
@@ -88,55 +99,86 @@ func (a *App) GetSubtitle(ctx context.Context, req *connect.Request[bigflixv1.Ge
 
 func (a *App) SearchSubtitles(ctx context.Context, req *connect.Request[bigflixv1.SearchSubtitlesRequest]) (*connect.Response[bigflixv1.SearchSubtitlesResponse], error) {
 	hash := strings.ToLower(strings.TrimSpace(req.Msg.Hash))
-	s, err := a.subtitleService(hash)
+	s, st, err := a.subtitleService(hash)
 	if err != nil {
 		return nil, err
 	}
-	movie, _ := a.engine.Get(hash)
-	imdb := ""
-	if movie.MovieID > 0 {
-		if detail, _, _, err := a.service.Detail(ctx, movie.MovieID); err == nil {
+	imdb := st.IMDbID
+	if imdb == "" && st.MovieID > 0 && a.service != nil {
+		if detail, _, _, err := a.service.Detail(ctx, st.MovieID); err == nil {
 			imdb = detail.IMDb
 		}
 	}
-	results, err := s.Search(ctx, imdb, movie.Title, req.Msg.Language)
+	if imdb == "" && st.TMDBID > 0 && a.service != nil {
+		if st.MediaType == "episode" {
+			if ser, _, _, err := a.service.SeriesDetail(ctx, st.TMDBID); err == nil {
+				imdb = ser.IMDb
+			}
+		} else {
+			if mov, _, _, err := a.service.MovieDetail(ctx, st.TMDBID); err == nil {
+				imdb = mov.IMDb
+			}
+		}
+	}
+
+	mediaType := st.MediaType
+	if mediaType == "" {
+		mediaType = "movie"
+	}
+	results, provider, err := s.SearchMedia(ctx, subtitles.SearchQuery{
+		IMDbID:    imdb,
+		TMDBID:    st.TMDBID,
+		MediaType: mediaType,
+		Title:     st.Title,
+		Season:    st.Season,
+		Episode:   st.Episode,
+		Language:  req.Msg.Language,
+	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}
-	// Search caches are shared; exclude downloads only for this movie.
 	available := make([]*bigflixv1.SubtitleSearchResult, 0, len(results))
 	for _, result := range results {
-		key := subtitles.DownloadKey(movie.Hash, result.ID, result.Language)
-		if _, _, err := s.DB.Get(ctx, key); err != nil {
-			available = append(available, &bigflixv1.SubtitleSearchResult{
-				Id:              int32(result.ID),
-				Language:        result.Language,
-				Label:           result.Label,
-				Rating:          int32(result.Rating),
-				HearingImpaired: result.HearingImpaired,
-				Page:            result.Page,
-			})
+		if result.Provider == "yify" {
+			key := subtitles.DownloadKey(st.Hash, result.ID, result.Language)
+			if _, _, err := s.DB.Get(ctx, key); err == nil {
+				continue
+			}
 		}
+		available = append(available, &bigflixv1.SubtitleSearchResult{
+			Id:              int32(result.ID),
+			Language:        result.Language,
+			Label:           result.Label,
+			Rating:          int32(result.Rating),
+			HearingImpaired: result.HearingImpaired,
+			Page:            result.Page,
+			Provider:        result.Provider,
+			DownloadKey:     result.DownloadKey,
+		})
 	}
-	return connect.NewResponse(&bigflixv1.SearchSubtitlesResponse{Results: available}), nil
+	return connect.NewResponse(&bigflixv1.SearchSubtitlesResponse{
+		Results:  available,
+		Provider: provider,
+	}), nil
 }
 
 func (a *App) AddSubtitle(ctx context.Context, req *connect.Request[bigflixv1.AddSubtitleRequest]) (*connect.Response[bigflixv1.AddSubtitleResponse], error) {
 	hash := strings.ToLower(strings.TrimSpace(req.Msg.Hash))
-	s, err := a.subtitleService(hash)
+	s, st, err := a.subtitleService(hash)
 	if err != nil {
 		return nil, err
 	}
+	fileIdx := effectiveFileIndex(req.Msg.FileIndex, st)
 	language := req.Msg.Language
 	if !subtitles.ValidLanguage(language) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid language"))
 	}
 	switch req.Msg.Action {
 	case "download":
-		if req.Msg.Id <= 0 {
+		if req.Msg.DownloadKey == "" && req.Msg.Id <= 0 {
 			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid subtitle ID"))
 		}
-		sub, err := s.Download(ctx, hash, int(req.Msg.Id), req.Msg.Label, language)
+		sub, err := s.DownloadMedia(ctx, hash, fileIdx, req.Msg.DownloadKey, int(req.Msg.Id), req.Msg.Label, language)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeUnavailable, err)
 		}
@@ -153,7 +195,7 @@ func (a *App) AddSubtitle(ctx context.Context, req *connect.Request[bigflixv1.Ad
 			}
 			return nil, connect.NewError(connect.CodeUnavailable, errors.New("subtitle pieces unavailable; retry when peers connect"))
 		}
-		sub, err := subtitles.Save(ctx, s.DB, hash, label, language, b)
+		sub, err := subtitles.SaveForFile(ctx, s.DB, hash, fileIdx, label, language, b)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -161,7 +203,7 @@ func (a *App) AddSubtitle(ctx context.Context, req *connect.Request[bigflixv1.Ad
 			Track: &bigflixv1.SubtitleTrack{Id: sub.ID, Label: sub.Label, Language: sub.Language},
 		}), nil
 	case "embedded":
-		track, vtt, err := a.extractEmbeddedSubtitle(ctx, hash, int(req.Msg.Index))
+		track, vtt, err := a.extractEmbeddedSubtitleForFile(ctx, hash, fileIdx, int(req.Msg.Index))
 		if err != nil {
 			if errors.Is(err, errFFmpegMissing) {
 				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
@@ -173,7 +215,7 @@ func (a *App) AddSubtitle(ctx context.Context, req *connect.Request[bigflixv1.Ad
 			lang = language
 		}
 		label := "Built-in · " + track.Label
-		sub, err := subtitles.Save(ctx, s.DB, hash, label, lang, vtt)
+		sub, err := subtitles.SaveForFile(ctx, s.DB, hash, fileIdx, label, lang, vtt)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -191,7 +233,7 @@ func (a *App) AddSubtitle(ctx context.Context, req *connect.Request[bigflixv1.Ad
 		if label == "" {
 			label = "Uploaded subtitle"
 		}
-		sub, err := subtitles.Save(ctx, s.DB, hash, label, language, req.Msg.Data)
+		sub, err := subtitles.SaveForFile(ctx, s.DB, hash, fileIdx, label, language, req.Msg.Data)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}

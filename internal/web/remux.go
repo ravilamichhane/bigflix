@@ -32,15 +32,25 @@ type embeddedSubtitle struct {
 	HearingImpaired bool   `json:"hearing_impaired"`
 }
 
+type embeddedAudio struct {
+	StreamIndex int    `json:"stream_index"`
+	Language    string `json:"language"`
+	Label       string `json:"label"`
+	Codec       string `json:"codec"`
+	Channels    int    `json:"channels"`
+	Default     bool   `json:"default"`
+}
+
 // Media probe results for containers the browser cannot open directly.
 type mediaProbe struct {
-	Duration  float64            `json:"duration"`
-	Video     string             `json:"video"`
-	Codecs    string             `json:"codecs"`
-	Width     int                `json:"width"`
-	Height    int                `json:"height"`
-	Audio     string             `json:"audio"`
-	Subtitles []embeddedSubtitle `json:"subtitles,omitempty"`
+	Duration    float64            `json:"duration"`
+	Video       string             `json:"video"`
+	Codecs      string             `json:"codecs"`
+	Width       int                `json:"width"`
+	Height      int                `json:"height"`
+	Audio       string             `json:"audio"`
+	AudioTracks []embeddedAudio    `json:"audio_tracks,omitempty"`
+	Subtitles   []embeddedSubtitle `json:"subtitles,omitempty"`
 }
 
 type activeStream struct {
@@ -54,6 +64,9 @@ var (
 	remuxMu          sync.Mutex
 	activeRemux      = map[string]activeStream{}
 	remuxSeq         uint64
+	subStreamMu      sync.Mutex
+	activeSubStream  = map[string]activeStream{}
+	subStreamSeq     uint64
 	encoderOne       sync.Once
 	h264Enc          = "libx264"
 	vaapiDevice      = ""
@@ -69,6 +82,7 @@ var (
 
 func (a *App) remuxRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /media/{hash}/remux", a.requireMediaAuth(http.HandlerFunc(a.remux)))
+	mux.Handle("GET /media/{hash}/subtitle/{stream}", a.requireMediaAuth(http.HandlerFunc(a.streamEmbeddedSubtitle)))
 }
 
 func clearProbeCache(hash string) {
@@ -87,11 +101,17 @@ func clearProbeCache(hash string) {
 		delete(activeRemux, key)
 	}
 	remuxMu.Unlock()
+	subStreamMu.Lock()
+	if prev, ok := activeSubStream[key]; ok {
+		prev.cancel()
+		delete(activeSubStream, key)
+	}
+	subStreamMu.Unlock()
 }
 
 // selfURL points ffmpeg back at the byte-range media route on the address the
 // request arrived on, so torrent piece prioritization keeps working.
-func (a *App) selfURL(ctx context.Context, hash string) (string, bool) {
+func (a *App) selfURL(ctx context.Context, hash string, fileIndex int) (string, bool) {
 	addr, ok := ctx.Value(http.LocalAddrContextKey).(net.Addr)
 	if !ok {
 		return "", false
@@ -104,33 +124,48 @@ func (a *App) selfURL(ctx context.Context, hash string) (string, bool) {
 		host = "127.0.0.1"
 	}
 	u := "http://" + net.JoinHostPort(host, port) + "/media/" + hash
+	q := url.Values{}
 	if token := a.getToken(); token != "" {
-		u += "?token=" + url.QueryEscape(token)
+		q.Set("token", token)
+	}
+	if fileIndex >= 0 {
+		q.Set("file", strconv.Itoa(fileIndex))
+	}
+	if enc := q.Encode(); enc != "" {
+		u += "?" + enc
 	}
 	return u, true
 }
 
-func (a *App) remuxSourceCtx(ctx context.Context, hash string) (downloads.Status, string, error) {
+func (a *App) remuxSourceCtx(ctx context.Context, hash string, fileIndex int) (downloads.Status, int, string, error) {
 	if a.engine == nil || downloads.FFmpeg == "" {
-		return downloads.Status{}, "", errFFmpegMissing
+		return downloads.Status{}, -1, "", errFFmpegMissing
 	}
 	s, err := a.engine.Get(hash)
 	if err != nil {
-		return s, "", downloads.ErrNotFound
+		return s, -1, "", downloads.ErrNotFound
 	}
-	src, ok := a.selfURL(ctx, s.Hash)
+	effFile := s.FileIndex
+	if fileIndex >= 0 {
+		effFile = fileIndex
+	}
+	src, ok := a.selfURL(ctx, s.Hash, fileIndex)
 	if !ok {
-		return s, "", errNoLocalAddr
+		return s, effFile, "", errNoLocalAddr
 	}
-	return s, src, nil
+	return s, effFile, src, nil
 }
 
 func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
-	s, src, err := a.remuxSourceCtx(ctx, hash)
+	return a.probeMediaForFile(ctx, hash, -1)
+}
+
+func (a *App) probeMediaForFile(ctx context.Context, hash string, fileIndex int) (mediaProbe, error) {
+	s, effFile, src, err := a.remuxSourceCtx(ctx, hash, fileIndex)
 	if err != nil {
 		return mediaProbe{}, err
 	}
-	key := fmt.Sprintf("%s/%d", s.Hash, s.FileIndex)
+	key := fmt.Sprintf("%s/%d", s.Hash, effFile)
 	probeMu.Lock()
 	p, cached := probeCache[key]
 	probeMu.Unlock()
@@ -141,7 +176,7 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 	pctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(pctx, ffprobe, "-v", "error", "-rw_timeout", "60000000",
-		"-show_entries", "format=duration:stream=index,codec_type,codec_name,profile,width,height,level:stream_tags=language,title:stream_disposition=default,forced,hearing_impaired",
+		"-show_entries", "format=duration:stream=index,codec_type,codec_name,profile,width,height,level,channels:stream_tags=language,title:stream_disposition=default,forced,hearing_impaired",
 		"-of", "json", src).Output()
 	if err != nil {
 		return mediaProbe{}, errProbeWait
@@ -158,6 +193,7 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 			Width       int               `json:"width"`
 			Height      int               `json:"height"`
 			Level       int               `json:"level"`
+			Channels    int               `json:"channels"`
 			Tags        map[string]string `json:"tags"`
 			Disposition struct {
 				Default         int `json:"default"`
@@ -175,8 +211,22 @@ func (a *App) probeMedia(ctx context.Context, hash string) (mediaProbe, error) {
 		case st.Type == "video" && p.Video == "":
 			p.Video, p.Width, p.Height = st.Codec, st.Width, st.Height
 			p.Codecs = codecString(st.Codec, st.Profile, st.Level)
-		case st.Type == "audio" && p.Audio == "":
-			p.Audio = st.Codec
+		case st.Type == "audio":
+			if p.Audio == "" {
+				p.Audio = st.Codec
+			}
+			langRaw := tagCaseInsensitive(st.Tags, "language")
+			title := strings.TrimSpace(tagCaseInsensitive(st.Tags, "title"))
+			code, langName := normalizeSubLang(langRaw)
+			label := buildEmbeddedAudioLabel(langName, title, st.Channels, len(p.AudioTracks)+1)
+			p.AudioTracks = append(p.AudioTracks, embeddedAudio{
+				StreamIndex: st.Index,
+				Language:    code,
+				Label:       label,
+				Codec:       st.Codec,
+				Channels:    st.Channels,
+				Default:     st.Disposition.Default == 1,
+			})
 		case st.Type == "subtitle" && isTextSubtitleCodec(st.Codec):
 			langRaw := tagCaseInsensitive(st.Tags, "language")
 			title := strings.TrimSpace(tagCaseInsensitive(st.Tags, "title"))
@@ -234,6 +284,24 @@ func normalizeSubLang(raw string) (code, name string) {
 		return "hi", "Hindi"
 	case "ne", "nep":
 		return "ne", "Nepali"
+	case "ta", "tam":
+		return "ta", "Tamil"
+	case "te", "tel":
+		return "te", "Telugu"
+	case "kn", "kan":
+		return "kn", "Kannada"
+	case "ml", "mal":
+		return "ml", "Malayalam"
+	case "bn", "ben":
+		return "bn", "Bengali"
+	case "mr", "mar":
+		return "mr", "Marathi"
+	case "pa", "pan":
+		return "pa", "Punjabi"
+	case "ur", "urd":
+		return "ur", "Urdu"
+	case "uk", "ukr":
+		return "uk", "Ukrainian"
 	case "pt", "por", "pt-br":
 		return "pt-br", "Portuguese"
 	case "ar", "ara":
@@ -299,12 +367,52 @@ func buildEmbeddedSubLabel(langName, title string, streamIndex int, forced, sdh 
 	return base
 }
 
+func channelLayoutLabel(ch int) string {
+	switch ch {
+	case 1:
+		return "Mono"
+	case 2:
+		return "Stereo"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	default:
+		if ch > 2 {
+			return fmt.Sprintf("%dch", ch)
+		}
+		return ""
+	}
+}
+
+func buildEmbeddedAudioLabel(langName, title string, channels, order int) string {
+	var base string
+	switch {
+	case title != "" && langName != "" && langName != "Unknown" && !strings.Contains(strings.ToLower(title), strings.ToLower(langName)):
+		base = langName + " · " + title
+	case title != "":
+		base = title
+	case langName != "" && langName != "Unknown":
+		base = langName
+	default:
+		base = fmt.Sprintf("Audio #%d", order)
+	}
+	if chLabel := channelLayoutLabel(channels); chLabel != "" && !strings.Contains(strings.ToLower(base), strings.ToLower(chLabel)) {
+		base += " · " + chLabel
+	}
+	return base
+}
+
 func (a *App) cachedEmbeddedSubtitles(ctx context.Context, hash string) []embeddedSubtitle {
-	s, _, err := a.remuxSourceCtx(ctx, hash)
+	return a.cachedEmbeddedSubtitlesForFile(ctx, hash, -1)
+}
+
+func (a *App) cachedEmbeddedSubtitlesForFile(ctx context.Context, hash string, fileIndex int) []embeddedSubtitle {
+	s, effFile, _, err := a.remuxSourceCtx(ctx, hash, fileIndex)
 	if err != nil || s.Size <= 0 || s.Paused {
 		return nil
 	}
-	key := fmt.Sprintf("%s/%d", s.Hash, s.FileIndex)
+	key := fmt.Sprintf("%s/%d", s.Hash, effFile)
 	probeMu.Lock()
 	p, cached := probeCache[key]
 	probeMu.Unlock()
@@ -314,7 +422,7 @@ func (a *App) cachedEmbeddedSubtitles(ctx context.Context, hash string) []embedd
 	// Quick opportunistic probe so built-in subtitles appear even before pressing Play.
 	pctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	p, err = a.probeMedia(pctx, hash)
+	p, err = a.probeMediaForFile(pctx, hash, fileIndex)
 	if err != nil {
 		return nil
 	}
@@ -322,11 +430,15 @@ func (a *App) cachedEmbeddedSubtitles(ctx context.Context, hash string) []embedd
 }
 
 func (a *App) extractEmbeddedSubtitle(ctx context.Context, hash string, streamIndex int) (embeddedSubtitle, []byte, error) {
-	s, src, err := a.remuxSourceCtx(ctx, hash)
+	return a.extractEmbeddedSubtitleForFile(ctx, hash, -1, streamIndex)
+}
+
+func (a *App) extractEmbeddedSubtitleForFile(ctx context.Context, hash string, fileIndex int, streamIndex int) (embeddedSubtitle, []byte, error) {
+	s, _, src, err := a.remuxSourceCtx(ctx, hash, fileIndex)
 	if err != nil {
 		return embeddedSubtitle{}, nil, err
 	}
-	p, err := a.probeMedia(ctx, hash)
+	p, err := a.probeMediaForFile(ctx, hash, fileIndex)
 	if err != nil {
 		return embeddedSubtitle{}, nil, err
 	}
@@ -387,6 +499,128 @@ func (a *App) extractEmbeddedSubtitle(ctx context.Context, hash string, streamIn
 		return embeddedSubtitle{}, nil, errors.New("built-in subtitle track exceeds 2 MB limit")
 	}
 	return *target, buf.Bytes(), nil
+}
+
+// streamEmbeddedSubtitle progressively extracts and flushes WebVTT cues from an
+// embedded MKV/MP4 subtitle stream starting near ?t=seconds, allowing built-in
+// subtitles to play immediately while the torrent is still downloading.
+func (a *App) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request) {
+	streamIndex, err := strconv.Atoi(r.PathValue("stream"))
+	if err != nil || streamIndex < 0 {
+		http.Error(w, "invalid subtitle stream index", http.StatusBadRequest)
+		return
+	}
+	fileIndex := -1
+	if rawFile := strings.TrimSpace(r.URL.Query().Get("file")); rawFile != "" {
+		if idx, err := strconv.Atoi(rawFile); err == nil && idx >= 0 {
+			fileIndex = idx
+		}
+	}
+	s, _, src, err := a.remuxSourceCtx(r.Context(), r.PathValue("hash"), fileIndex)
+	if err != nil {
+		switch {
+		case errors.Is(err, downloads.ErrNotFound):
+			http.NotFound(w, r)
+		case errors.Is(err, errFFmpegMissing):
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	p, err := a.probeMediaForFile(r.Context(), s.Hash, fileIndex)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	var target *embeddedSubtitle
+	for i := range p.Subtitles {
+		if p.Subtitles[i].StreamIndex == streamIndex {
+			target = &p.Subtitles[i]
+			break
+		}
+	}
+	if target == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	sctx, cancel := context.WithCancel(r.Context())
+	subStreamMu.Lock()
+	subStreamSeq++
+	myID := subStreamSeq
+	if prev, ok := activeSubStream[s.Hash]; ok {
+		prev.cancel()
+	}
+	activeSubStream[s.Hash] = activeStream{id: myID, cancel: cancel}
+	subStreamMu.Unlock()
+	defer func() {
+		cancel()
+		subStreamMu.Lock()
+		if cur, ok := activeSubStream[s.Hash]; ok && cur.id == myID {
+			delete(activeSubStream, s.Hash)
+		}
+		subStreamMu.Unlock()
+	}()
+
+	start, _ := strconv.ParseFloat(r.URL.Query().Get("t"), 64)
+	start = max(0, start)
+
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-rw_timeout", "60000000",
+		"-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
+	}
+	if start > 0 {
+		seekFrom := max(0, start-5)
+		args = append(args, "-ss", strconv.FormatFloat(seekFrom, 'f', 3, 64), "-copyts")
+	}
+	args = append(args,
+		"-i", src,
+		"-map", fmt.Sprintf("0:%d", target.StreamIndex),
+		"-vn", "-an", "-dn",
+		"-c:s", "webvtt",
+		"-f", "webvtt",
+		"-flush_packets", "1",
+		"pipe:1",
+	)
+
+	cmd := exec.CommandContext(sctx, downloads.FFmpeg, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		http.Error(w, "Unable to start live subtitle stream", http.StatusInternalServerError)
+		return
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		http.Error(w, "Unable to start live subtitle stream", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err := cmd.Wait(); err != nil && sctx.Err() == nil {
+			slog.Warn("live embedded subtitle stream ended", "hash", s.Hash, "stream", streamIndex, "error", err, "stderr", stderr.String())
+		}
+	}()
+
+	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Time{})
+
+	buf := make([]byte, 4<<10)
+	for {
+		n, readErr := stdout.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			_ = controller.Flush()
+		}
+		if readErr != nil {
+			return
+		}
+	}
 }
 
 func codecString(codec, profile string, level int) string {
@@ -475,7 +709,13 @@ func ffmpegPreset() string {
 }
 
 func (a *App) remux(w http.ResponseWriter, r *http.Request) {
-	s, src, err := a.remuxSourceCtx(r.Context(), r.PathValue("hash"))
+	fileIndex := -1
+	if rawFile := strings.TrimSpace(r.URL.Query().Get("file")); rawFile != "" {
+		if idx, err := strconv.Atoi(rawFile); err == nil && idx >= 0 {
+			fileIndex = idx
+		}
+	}
+	s, effFile, src, err := a.remuxSourceCtx(r.Context(), r.PathValue("hash"), fileIndex)
 	if err != nil {
 		switch {
 		case errors.Is(err, downloads.ErrNotFound):
@@ -518,8 +758,13 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 		maxH = 0
 	}
 	probeMu.Lock()
-	p := probeCache[fmt.Sprintf("%s/%d", s.Hash, s.FileIndex)]
+	p, probeCached := probeCache[fmt.Sprintf("%s/%d", s.Hash, effFile)]
 	probeMu.Unlock()
+	if !probeCached && strings.TrimSpace(r.URL.Query().Get("a")) != "" {
+		if probed, perr := a.probeMediaForFile(rctx, s.Hash, fileIndex); perr == nil {
+			p = probed
+		}
+	}
 
 	// Default compat transcode to <=1080p when source is >1080p so high-res
 	// fallback runs faster than real time and stays within browser MSE quotas.
@@ -561,7 +806,20 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 	if start > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(start, 'f', 3, 64))
 	}
-	args = append(args, "-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-map_chapters", "-1")
+	audioMap := "0:a:0?"
+	audioCodec := p.Audio
+	if rawAudio := strings.TrimSpace(r.URL.Query().Get("a")); rawAudio != "" {
+		if aIdx, err := strconv.Atoi(rawAudio); err == nil && aIdx >= 0 {
+			for _, tr := range p.AudioTracks {
+				if tr.StreamIndex == aIdx {
+					audioMap = fmt.Sprintf("0:%d", tr.StreamIndex)
+					audioCodec = tr.Codec
+					break
+				}
+			}
+		}
+	}
+	args = append(args, "-i", src, "-map", "0:v:0", "-map", audioMap, "-sn", "-dn", "-map_chapters", "-1")
 	if compat {
 		outH := scaledHeight(p.Width, p.Height, maxH)
 		rate, maxRate, bufSize := "6M", "8M", "12M"
@@ -622,7 +880,7 @@ func (a *App) remux(w http.ResponseWriter, r *http.Request) {
 			args = append(args, "-tag:v", "hvc1")
 		}
 	}
-	if p.Audio == "aac" {
+	if audioCodec == "aac" {
 		args = append(args, "-c:a", "copy")
 	} else {
 		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
