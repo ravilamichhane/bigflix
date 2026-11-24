@@ -1,0 +1,1 @@
+import{o,r,n,j as s,N as u}from"./index-CJVwIM7F.js";function a(){const{tmdbId:t}=o.useParams(),e=Number(t);return r.useEffect(()=>{Number.isInteger(e)&&e>0&&n(`/movie/${e}`)},[e]),!Number.isInteger(e)||e<=0?s.jsx(u,{}):null}export{a as component};

@@ -37,6 +37,16 @@
   z-index: 9999;
 }
 
+/* Hide mouse cursor in fullscreen once idle controls fade out */
+.kp.kp-fs:not(.kp-ui-open),
+.kp.kp-fs:not(.kp-ui-open) *,
+.kp:fullscreen:not(.kp-ui-open),
+.kp:fullscreen:not(.kp-ui-open) *,
+.kp:-webkit-full-screen:not(.kp-ui-open),
+.kp:-webkit-full-screen:not(.kp-ui-open) * {
+  cursor: none !important;
+}
+
 /* CRITICAL FIX: absolute inset: 0 + object-fit: contain + object-position: center
    guarantees 2.39:1, 1.85:1, 16:9, 4:3, and vertical videos ALWAYS sit dead-center
    and NEVER float to the top of the container. */

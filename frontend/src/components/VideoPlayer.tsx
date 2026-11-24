@@ -201,6 +201,7 @@ export function VideoPlayer({
   const probePromiseRef = useRef<Promise<ProbeMediaResponse> | null>(null);
   const hideTimerRef = useRef<number | undefined>(undefined);
   const feedbackTimerRef = useRef<number | undefined>(undefined);
+  const lastPointerRef = useRef<{ x: number; y: number }>({ x: -1, y: -1 });
   const lastTapRef = useRef<{ time: number; side: "left" | "right" | "center" }>({
     time: 0,
     side: "center",
@@ -247,16 +248,18 @@ export function VideoPlayer({
       hideTimerRef.current = undefined;
     }
     if (!keepOpen) {
+      const delay = document.fullscreenElement ? 2500 : 3500;
       hideTimerRef.current = window.setTimeout(() => {
         if (
           wantPlayRef.current &&
           !scrubbingRef.current &&
           !qualityOpenRef.current &&
-          !audioOpenRef.current
+          !audioOpenRef.current &&
+          !document.querySelector("dialog[open]")
         ) {
           setControlsVisible(false);
         }
-      }, 4000);
+      }, delay);
     }
   }, []);
 
@@ -1286,8 +1289,12 @@ export function VideoPlayer({
 
     const onFsChange = () => {
       const webkitFs = Boolean(video.webkitDisplayingFullscreen);
+      const fs = Boolean(document.fullscreenElement || webkitFs);
       setNativeFullscreen(webkitFs);
-      setIsFullscreen(Boolean(document.fullscreenElement || webkitFs));
+      setIsFullscreen(fs);
+      if (fs && wantPlayRef.current) {
+        showControls(false);
+      }
     };
 
     video.addEventListener("loadedmetadata", onLoadedMeta);
@@ -1610,7 +1617,12 @@ export function VideoPlayer({
       ref={containerRef}
       className={`kp ${uiOpen ? "kp-ui-open" : ""} ${isFullscreen ? "kp-fs" : ""}`}
       onPointerMove={(e) => {
-        if (e.pointerType === "mouse") showControls(false);
+        if (e.pointerType !== "mouse") return;
+        if (lastPointerRef.current.x === e.clientX && lastPointerRef.current.y === e.clientY) {
+          return;
+        }
+        lastPointerRef.current = { x: e.clientX, y: e.clientY };
+        showControls(false);
       }}
       onPointerLeave={(e) => {
         if (
